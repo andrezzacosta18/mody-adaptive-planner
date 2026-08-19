@@ -5,17 +5,15 @@ from supabase import create_client, Client
 @st.cache_resource
 def get_client() -> Client:
     """
-    Cria (e reaproveita, via cache) o cliente Supabase.
+    Cria e reaproveita o cliente Supabase.
 
-    Usa a anon_key — é a chave pensada para rodar no lado do
-    cliente. Ela pode ficar nos secrets do app com segurança
-    DESDE QUE o Row Level Security esteja habilitado nas tabelas
-    (ver sql/001_initial_schema.sql). É o RLS que impede um
-    usuário de ler dados de outro, não o sigilo desta chave.
+    Usa a publishable key do projeto.
+    O acesso aos dados deve ser protegido por Row Level Security (RLS).
 
-    A service_role key (que ignora RLS) NUNCA deve ser usada aqui
-    nem colocada em nenhum secret acessível pelo app Streamlit.
+    Nunca use a secret key ou service_role key neste arquivo.
     """
+
     url = st.secrets["supabase"]["url"]
-    anon_key = st.secrets["supabase"]["anon_key"]
-    return create_client(url, anon_key)
+    publishable_key = st.secrets["supabase"]["publishable_key"]
+
+    return create_client(url, publishable_key)
