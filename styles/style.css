@@ -1,0 +1,54 @@
+/* Estilo geral: espaçamento confortável e visual calmo */
+
+.block-container {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+    max-width: 640px;
+}
+
+/* Título principal */
+h1 {
+    font-weight: 600;
+    color: #2f3e46;
+}
+
+/* Cartão que envolve blocos de informação (tarefa, compromisso) */
+.card {
+    background-color: #f4f6f5;
+    border-radius: 16px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1rem;
+    border: 1px solid #e2e8e6;
+}
+
+.card-label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b7d76;
+    margin-bottom: 0.2rem;
+}
+
+.card-value {
+    font-size: 1.15rem;
+    color: #2f3e46;
+    font-weight: 500;
+}
+
+/* Botões do Streamlit: cantos arredondados, sem agressividade visual */
+div.stButton > button {
+    border-radius: 12px;
+    padding: 0.6rem 1rem;
+    border: 1px solid #d7ded9;
+    font-weight: 500;
+}
+
+/* Mensagem de resposta calma, sem cores de alarme */
+.resposta-suave {
+    background-color: #eef2ee;
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    margin-top: 0.8rem;
+    color: #3a4a44;
+    font-size: 0.95rem;
+}
