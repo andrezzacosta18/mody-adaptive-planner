@@ -1,5 +1,6 @@
 import html
 
+import pandas as pd
 import streamlit as st
 
 from services.auth_service import restore_session, sign_in, sign_out, sign_up
@@ -11,6 +12,12 @@ from services.onboarding_service import (
 )
 from services.checkin_service import create_checkin
 from services.task_service import complete_task, get_tasks
+from services.analytics_service import (
+    get_task_metrics,
+    get_checkin_metrics,
+    get_checkin_state_distribution,
+    get_checkin_timeseries,
+)
 
 # --- Basic page configuration ---
 st.set_page_config(
@@ -460,6 +467,136 @@ def show_home(user_id: str, display_name: str | None) -> None:
 
 
 # =========================================================
+# Screen: Overview / Dashboard ("Visão geral")
+#
+# Read-only screen built entirely from services/analytics_service.py.
+# app.py never computes metrics itself and never touches Supabase
+# directly for analytics. Each section calls exactly one analytics
+# function and checks its own "success" flag, so a single failing
+# call only breaks its own section — the others still render.
+#
+# user_id is always the authenticated session's id (passed in by the
+# router); this screen never lets it be edited.
+# =========================================================
+CHECKIN_STATE_LABELS_PT = {
+    "well": "Bem",
+    "overwhelmed": "Sobrecarregada",
+    "calm_needed": "Preciso me acalmar",
+}
+
+
+def _format_average(value) -> str:
+    """Check-in averages can be None when there is no numeric data.
+    Show 'Sem dados' instead of a misleading 0, and never interpret
+    the number (no "energia baixa" etc.) — descriptive only."""
+    return "Sem dados" if value is None else str(value)
+
+
+def show_overview(user_id: str, display_name: str | None) -> None:
+    st.title("Visão geral")
+    greeting_name = display_name or "você"
+    st.caption(f"Um resumo do seu progresso, {greeting_name}.")
+
+    # ---- Section 1: Task KPIs ----
+    st.subheader("Tarefas")
+    task_result = get_task_metrics(user_id)
+    if not task_result["success"]:
+        st.error(task_result["error"])
+    else:
+        task_data = task_result["data"]
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de tarefas", task_data["total_tasks"])
+        col2.metric("Pendentes", task_data["pending_tasks"])
+        col3.metric("Concluídas", task_data["completed_tasks"])
+        col4.metric("Taxa de conclusão", f"{task_data['completion_rate']}%")
+        if task_data["total_tasks"] == 0:
+            st.info("Ainda não há tarefas registradas.")
+
+    st.divider()
+
+    # ---- Section 2: Check-in KPIs ----
+    st.subheader("Check-ins")
+    checkin_result = get_checkin_metrics(user_id)
+    if not checkin_result["success"]:
+        st.error(checkin_result["error"])
+    else:
+        checkin_data = checkin_result["data"]
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de check-ins", checkin_data["total_checkins"])
+        col2.metric("Energia média", _format_average(checkin_data["average_energy"]))
+        col3.metric("Ansiedade média", _format_average(checkin_data["average_anxiety"]))
+        col4.metric("Foco médio", _format_average(checkin_data["average_focus"]))
+        if checkin_data["total_checkins"] == 0:
+            st.info("Ainda não há check-ins registrados.")
+
+    st.divider()
+
+    # ---- Section 3: Check-in distribution (bar chart) ----
+    st.subheader("Distribuição dos check-ins")
+    distribution_result = get_checkin_state_distribution(user_id)
+    if not distribution_result["success"]:
+        st.error(distribution_result["error"])
+    else:
+        distribution = distribution_result["data"]
+        total_checkins = sum(item["count"] for item in distribution)
+        if total_checkins == 0:
+            st.info("Ainda não há check-ins registrados.")
+        else:
+            # pandas is used ONLY to shape data for the native chart, so the
+            # x-axis shows Portuguese labels instead of internal state names.
+            distribution_df = pd.DataFrame(
+                {
+                    "Estado": [
+                        CHECKIN_STATE_LABELS_PT.get(item["state"], item["state"])
+                        for item in distribution
+                    ],
+                    "Check-ins": [item["count"] for item in distribution],
+                }
+            )
+            st.bar_chart(distribution_df, x="Estado", y="Check-ins")
+
+    st.divider()
+
+    # ---- Section 4: Recent check-in evolution (line chart) ----
+    st.subheader("Evolução recente dos check-ins")
+    timeseries_result = get_checkin_timeseries(user_id, limit=10)
+    if not timeseries_result["success"]:
+        st.error(timeseries_result["error"])
+    else:
+        timeseries = timeseries_result["data"]
+        numeric_columns = ["energy_level", "anxiety_level", "focus_level"]
+
+        # "Enough data" means at least one non-None numeric value across the
+        # recent check-ins. None is never coerced to zero.
+        has_numeric_data = any(
+            row.get(column) is not None
+            for row in timeseries
+            for column in numeric_columns
+        )
+
+        if not timeseries or not has_numeric_data:
+            st.info("Ainda não há dados suficientes para mostrar a evolução.")
+        else:
+            # pandas ONLY prepares chart data here — no analytics is computed.
+            # Missing values become NaN (not 0), which st.line_chart renders
+            # as gaps in the line rather than dropping the point to zero.
+            evolution_df = pd.DataFrame(timeseries)
+            evolution_df["created_at"] = pd.to_datetime(evolution_df["created_at"])
+            evolution_df = evolution_df.rename(
+                columns={
+                    "energy_level": "Energia",
+                    "anxiety_level": "Ansiedade",
+                    "focus_level": "Foco",
+                }
+            )
+            st.line_chart(
+                evolution_df,
+                x="created_at",
+                y=["Energia", "Ansiedade", "Foco"],
+            )
+
+
+# =========================================================
 # Routing
 # =========================================================
 if not is_authenticated():
@@ -472,4 +609,13 @@ else:
         show_onboarding(current_user_id)
     else:
         profile = get_existing_data(current_user_id)["profile"] or {}
-        show_home(current_user_id, profile.get("display_name"))
+        display_name = profile.get("display_name")
+
+        # Streamlit-native navigation between the two authenticated screens.
+        # Login and onboarding intentionally have no sidebar nav.
+        page = st.sidebar.radio("Navegação", ("Hoje", "Visão geral"))
+
+        if page == "Hoje":
+            show_home(current_user_id, display_name)
+        else:
+            show_overview(current_user_id, display_name)
