@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from services.auth_service import restore_session, sign_in, sign_out, sign_up
@@ -7,6 +9,7 @@ from services.onboarding_service import (
     save_preferences,
     save_profile,
 )
+from services.task_service import complete_task, get_tasks
 
 # --- Basic page configuration ---
 st.set_page_config(
@@ -268,8 +271,71 @@ def show_onboarding(user_id: str) -> None:
 
 
 # =========================================================
-# Screen: Home (mock data)
+# Screen: Home
+#
+# The current task card now shows a real pending task from
+# services/task_service.py. The "next appointment" card is
+# still mock data — real calendar integration is a later phase.
 # =========================================================
+PRIORITY_LABELS_PT = {"low": "Baixa", "medium": "Média", "high": "Alta"}
+
+
+def _render_current_task_card(task: dict | None) -> str:
+    """Builds the HTML for the 'Tarefa atual' card: either the
+    current pending task's details, or a friendly empty-state
+    message when there are none. Uses inline styles for the
+    secondary detail lines to avoid adding new classes to
+    styles/style.css.
+
+    Security: task fields (title, description, priority, due_date)
+    come from the database and are ultimately user-controlled input
+    (the person types the title/description themselves). Since this
+    HTML is rendered with unsafe_allow_html=True, every such value
+    MUST be escaped with html.escape() before interpolation, or a
+    task title/description containing HTML/JS would be rendered as
+    live markup instead of plain text (stored XSS).
+    """
+    if task is None:
+        return (
+            '<div class="card">'
+            '<div class="card-label">Tarefa atual</div>'
+            '<div class="card-value">Nenhuma tarefa pendente por enquanto.</div>'
+            "</div>"
+        )
+
+    detail_style = "font-size:0.85rem;color:#6b7d76;margin-top:0.3rem;"
+    details = []
+
+    if task.get("description"):
+        safe_description = html.escape(str(task["description"]))
+        details.append(f'<div style="{detail_style}">{safe_description}</div>')
+    if task.get("priority"):
+        priority_label = PRIORITY_LABELS_PT.get(task["priority"], task["priority"])
+        safe_priority_label = html.escape(str(priority_label))
+        details.append(f'<div style="{detail_style}">Prioridade: {safe_priority_label}</div>')
+    if task.get("estimated_minutes"):
+        # estimated_minutes is a validated positive integer (see
+        # task_service.py), not free text, but str() + escape kept
+        # for consistency rather than trusting a raw interpolation.
+        safe_minutes = html.escape(str(task["estimated_minutes"]))
+        details.append(
+            f'<div style="{detail_style}">Tempo estimado: {safe_minutes} min</div>'
+        )
+    if task.get("due_date"):
+        safe_due_date = html.escape(str(task["due_date"]))
+        details.append(f'<div style="{detail_style}">Vence em: {safe_due_date}</div>')
+
+    safe_title = html.escape(str(task["title"]))
+
+    return (
+        '<div class="card">'
+        '<div class="card-label">Tarefa atual</div>'
+        f'<div class="card-value">{safe_title}</div>'
+        + "".join(details)
+        + "</div>"
+    )
+
+
 def show_home(user_id: str, display_name: str | None) -> None:
     col_title, col_logout = st.columns([4, 1])
     with col_title:
@@ -284,14 +350,24 @@ def show_home(user_id: str, display_name: str | None) -> None:
     greeting_name = display_name or "você"
     st.caption(f"Olá, {greeting_name}")
 
-    # --- Mock data (kept from the previous phase) ---
-    current_task = "Escrever resumo da reunião de ontem"
+    # --- Current task: real pending task from task_service.py ---
+    tasks_result = get_tasks(user_id, status="pending")
+    if not tasks_result["success"]:
+        st.error(tasks_result["error"])
+        current_task = None
+    else:
+        pending_tasks = tasks_result["data"]
+        current_task = pending_tasks[0] if pending_tasks else None
+
+    # --- Next appointment: still mock data (calendar is a later phase) ---
     next_appointment = "Consulta médica às 15h00"
 
     if "checkin_state" not in st.session_state:
         st.session_state.checkin_state = None
     if "action_message" not in st.session_state:
         st.session_state.action_message = None
+    if "task_just_completed" not in st.session_state:
+        st.session_state.task_just_completed = False
 
     st.write("**Como você está agora?**")
 
@@ -315,12 +391,23 @@ def show_home(user_id: str, display_name: str | None) -> None:
 
     st.write("")
 
+    if st.session_state.task_just_completed:
+        st.success("Tarefa concluída! 🎉")
+        st.session_state.task_just_completed = False
+
+    st.markdown(_render_current_task_card(current_task), unsafe_allow_html=True)
+
+    if current_task is not None:
+        if st.button("Concluir", key="complete_current_task"):
+            result = complete_task(user_id, current_task["id"])
+            if result["success"]:
+                st.session_state.task_just_completed = True
+                st.rerun()
+            else:
+                st.error(result["error"])
+
     st.markdown(
         f"""
-        <div class="card">
-            <div class="card-label">Tarefa atual</div>
-            <div class="card-value">{current_task}</div>
-        </div>
         <div class="card">
             <div class="card-label">Próximo compromisso</div>
             <div class="card-value">{next_appointment}</div>
