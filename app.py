@@ -9,6 +9,7 @@ from services.onboarding_service import (
     save_preferences,
     save_profile,
 )
+from services.checkin_service import create_checkin
 from services.task_service import complete_task, get_tasks
 
 # --- Basic page configuration ---
@@ -364,6 +365,8 @@ def show_home(user_id: str, display_name: str | None) -> None:
 
     if "checkin_state" not in st.session_state:
         st.session_state.checkin_state = None
+    if "checkin_just_saved" not in st.session_state:
+        st.session_state.checkin_just_saved = False
     if "action_message" not in st.session_state:
         st.session_state.action_message = None
     if "task_just_completed" not in st.session_state:
@@ -374,13 +377,32 @@ def show_home(user_id: str, display_name: str | None) -> None:
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("🟢 Bem", use_container_width=True):
-            st.session_state.checkin_state = "well"
+            result = create_checkin(user_id=user_id, state="well")
+            if result["success"]:
+                st.session_state.checkin_state = "well"
+                st.session_state.checkin_just_saved = True
+            else:
+                st.error(result["error"])
     with col2:
         if st.button("🟡 Sobrecarregada", use_container_width=True):
-            st.session_state.checkin_state = "overwhelmed"
+            result = create_checkin(user_id=user_id, state="overwhelmed")
+            if result["success"]:
+                st.session_state.checkin_state = "overwhelmed"
+                st.session_state.checkin_just_saved = True
+            else:
+                st.error(result["error"])
     with col3:
         if st.button("🔴 Preciso me acalmar", use_container_width=True):
-            st.session_state.checkin_state = "calm_needed"
+            result = create_checkin(user_id=user_id, state="calm_needed")
+            if result["success"]:
+                st.session_state.checkin_state = "calm_needed"
+                st.session_state.checkin_just_saved = True
+            else:
+                st.error(result["error"])
+
+    if st.session_state.checkin_just_saved:
+        st.success("Check-in registrado.")
+        st.session_state.checkin_just_saved = False
 
     if st.session_state.checkin_state == "well":
         st.markdown('<div class="resposta-suave">Que bom. Vamos seguir com o seu dia.</div>', unsafe_allow_html=True)
