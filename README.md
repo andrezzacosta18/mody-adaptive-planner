@@ -1,410 +1,368 @@
 # Mody — Adaptive Planner
 
-Mody is an adaptive planning and self-regulation web application designed to help users organize their day according to both **available time and current capacity**.
+## Overview
 
-> **The user should not have to adapt to the planner.  
-> The planner should adapt to the user.**
+Mody is a productivity and planning support application built with
+Streamlit, Supabase/PostgreSQL, and pandas. People check in with how
+they're feeling, manage tasks and appointments, and see both a real-time
+overview of their own activity and a separate historical analytics dashboard
+built on a reproducible synthetic dataset.
 
-The project is currently under active development as an MVP.
+The interface is responsive and designed around a single guiding principle:
+*one thing at a time*. The Portuguese tagline — *"Um jeito mais leve de
+organizar o dia."* — captures the product's intention: a calmer, lower-friction
+way to stay organised.
 
----
+Mody is a productivity tool, not a diagnostic, medical, or psychological
+application. It never produces medical, ADHD, anxiety, or psychological
+conclusions about any user.
 
-## About the Project
+## Problem
 
-Traditional planners usually focus on:
+Most planning and productivity tools treat every day identically: the same
+task list, the same layout, regardless of how someone actually shows up
+that day. Mody explores how a planning interface can adapt its suggestions
+to a person's current, self-reported check-in state and pending workload —
+and, where richer data is available, to energy and focus levels as well —
+using simple, transparent, explainable rules rather than opaque scoring.
 
-```text
-Tasks
-  +
-Deadlines
-  +
-Available time
-```
+## Portfolio Objective
 
-Mody aims to go further by considering:
+This project demonstrates practical, end-to-end skills across:
 
-```text
-Tasks
-        +
-Priorities
-        +
-Calendar
-        +
-Available time
-        +
-Current capacity
-        +
-Historical patterns
-        ↓
-Adaptive Planning
-```
-
-The objective is not simply to maximize productivity.
-
-Mody aims to help users build plans that are **realistic, manageable and adaptable**.
-
----
+- **Data Analysis** — descriptive statistics, grouping, KPI design, grain-aware joins
+- **SQL / PostgreSQL** — data modeling, RLS policies, scoped queries via Supabase
+- **Python and pandas** — data preparation, aggregation, time-series handling
+- **Product analytics thinking** — defining the right analytical questions before writing code
+- **Data visualization** — Streamlit-native charts, lightweight KPI presentation
+- **Data quality awareness** — handling missing values, never coercing nulls to zero
+- **Streamlit** — multi-page app, session management, responsive layout
+- **Supabase** — Auth, Postgres, Row Level Security, per-session client
+- **Security-conscious data access** — auth.uid() boundary, no service_role in client code
 
 ## Core Features
 
-### Adaptive Planning
+- Authentication (Supabase Auth, email/password)
+- Onboarding and personalization preferences
+- Task management (create, complete, track status)
+- Check-ins (self-reported state; the data model and service also support
+  optional energy/anxiety/focus levels — see note below)
+- Internal appointment calendar (create, view upcoming, and delete appointments)
+- Next appointment displayed on the Today ("Hoje") page
+- Real-user analytics overview ("Visão geral")
+- Synthetic historical behavioral analytics ("Análise histórica")
+- Deterministic, rule-based adaptive planning suggestions
+- Custom Mody visual identity with responsive web interface designed for
+  calm, low cognitive load across desktop and mobile layouts
 
-Mody aims to create daily plans based on the user's tasks, priorities, available time, existing commitments and current capacity.
+> **Note on the adaptive suggestion:** the card labeled "✦ PARA AGORA"
+> currently uses the user's **latest real check-in state** and **current
+> pending task count**. The check-in data model and `checkin_service`
+> support optional numeric energy/anxiety/focus levels, and
+> `adaptive_service.get_adaptive_suggestion()` is already written to use
+> them whenever they are present — but the current Home check-in UI only
+> asks for a state (Estou bem / Estou sobrecarregada / Quero desacelerar),
+> not numeric levels. In regular use today the suggestion is driven by
+> state and pending task count. The energy/focus grouping shown on the
+> historical dashboard comes entirely from the separate synthetic demo
+> dataset, not from real check-ins.
 
-### Task Management
+> **Note on the appointment calendar:** the current MVP supports creating,
+> listing, and deleting appointments. There is no update/edit operation in
+> this version — to change an appointment, delete it and create a new one.
 
-Users will be able to create and manage tasks with information such as:
+## Architecture
 
-- priority;
-- deadline;
-- estimated duration;
-- actual duration;
-- status.
+Two clearly separated data pathways feed two clearly separated UI areas.
 
-### Daily Check-ins
+**Real user data:**
 
-Lightweight check-ins will allow users to record information such as energy, focus and perceived overload.
-
-These data can later provide context for planning and personal analytics.
-
-### Personalization
-
-During onboarding, users may optionally select preferences related to areas where they would like additional support, such as:
-
-- starting tasks;
-- organizing the day;
-- remembering commitments;
-- avoiding overload;
-- reducing distractions;
-- managing anxiety;
-- building routines;
-- estimating time.
-
-Mody is designed with ADHD and anxiety-related needs in mind, but it is **not a diagnostic or medical application**.
-
-### Calendar Integration
-
-Future versions will integrate with external calendars, initially Google Calendar, to understand existing commitments and available periods.
-
-### Calm Mode
-
-A simplified interface is planned for moments when the user feels overwhelmed.
-
-The goal is to reduce cognitive load and provide structured self-regulation support without presenting the feature as medical treatment or emergency assistance.
-
-### Personal Analytics
-
-Mody will eventually allow users to explore their own historical patterns over periods such as:
-
-```text
-30 days
-3 months
-6 months
-Custom period
 ```
-
-Possible insights include:
-
-- task completion trends;
-- estimated vs. actual task duration;
-- frequently postponed tasks;
-- productive periods of the day;
-- calendar workload;
-- changes in recorded energy or overload;
-- relationships between workload and task behavior.
-
-For example:
-
-> During the last 3 months, your tasks usually took longer than you initially estimated.
-
-or:
-
-> Your recorded overload tended to be higher during weeks with more calendar commitments.
-
-These are intended to be **observations from the user's own data**, not medical or psychological conclusions.
-
-Historical patterns may later help improve adaptive planning.
-
----
-
-## How Mody Learns
-
-The long-term product concept follows a continuous cycle:
-
-```text
-Plan
-  ↓
-Act
-  ↓
-Record
-  ↓
-Analyze
-  ↓
-Learn
-  ↓
-Adapt
-  ↓
-Plan better
-```
-
-Instead of only storing tasks, Mody aims to use historical information to help users better understand their own planning patterns.
-
----
-
-## AI Assistant
-
-Artificial Intelligence is planned as a later layer of the application.
-
-Potential use cases include:
-
-- breaking large tasks into smaller steps;
-- helping identify the next task;
-- explaining personal analytics;
-- answering questions about historical patterns;
-- supporting adaptive planning.
-
-The core application should remain functional without AI.
-
----
-
-## Technology Stack
-
-Current MVP:
-
-```text
-Frontend / UI
-Streamlit
-
-Application Logic
-Python
-
-Backend Services
-Supabase
-
-Database
-PostgreSQL
-
-Authentication
-Supabase Auth
-
-Authorization
-Row Level Security (RLS)
-
-Version Control
-Git + GitHub
-```
-
----
-
-## High-Level Architecture
-
-```text
-                User
-                  ↓
-              Streamlit
-                  ↓
-                Python
-                  ↓
-               Services
-             ┌────┴────┐
-             ↓         ↓
-           Auth      Database
-             ↓         ↓
-             └── Supabase
-                    ↓
-                PostgreSQL
-                    ↓
-                   RLS
-```
-
-Future integrations may include:
-
-```text
-Google Calendar
-Personal Analytics
-AI Assistant
-Notifications
-```
-
----
-
-## Data Privacy
-
-Mody is being designed as a multi-user application.
-
-Application data is associated with the authenticated user's `user_id`.
-
-Supabase Row Level Security is used to ensure that users can access only their own data.
-
-Conceptually:
-
-```text
-Authenticated User
+Streamlit UI (app.py)
         ↓
-       JWT
+Services layer (auth_service, task_service, checkin_service,
+               appointment_service, analytics_service, adaptive_service)
         ↓
-    auth.uid()
+Supabase / PostgreSQL (RLS-protected, per-session client)
+```
+
+**Synthetic portfolio data:**
+
+```
+Synthetic CSV dataset (data/synthetic/*.csv)
         ↓
-   RLS Policies
+Synthetic analytics service (services/synthetic_analytics_service.py)
         ↓
-   User's Data
+Historical portfolio dashboard ("Análise histórica")
 ```
 
-The application does not use the Supabase `service_role` key for normal client access.
+These two pathways never cross. The historical dashboard reads only the
+synthetic CSV files and never touches Supabase; the real-user pages read
+only Supabase (via the services layer) and never touch the synthetic
+dataset. The current synthetic pipeline has no Supabase write path, so
+synthetic demo data remains isolated from the real-user database.
 
-Privacy and LGPD requirements will be reviewed before testing the application with external users.
+## Data Model
 
----
+- **profiles** — display name, timezone, one row per authenticated user.
+- **personalization_preferences** — optional self-described support profile
+  and support needs, used only to personalize the experience (never to
+  diagnose).
+- **tasks** — title, description, status (`pending`, `in_progress`,
+  `completed`, `blocked`), priority, estimated duration, due date,
+  completion timestamp.
+- **checkins** — self-reported state (`well`, `overwhelmed`,
+  `calm_needed`), with optional 1–5 energy/anxiety/focus levels.
+- **appointments** — title, date, time, optional notes; RLS-protected per
+  user. Supports create, list upcoming, and delete.
 
-## Current Status
+All real tables are protected by Row Level Security, scoped to
+`auth.uid()`.
 
-### Completed
+## Analytics Questions
 
-- [x] Initial project structure
-- [x] Git repository
-- [x] Python virtual environment
-- [x] Streamlit setup
-- [x] Supabase project
-- [x] PostgreSQL initial schema
-- [x] Row Level Security
-- [x] Streamlit → Supabase connection
+The real-user overview ("Visão geral") and the synthetic historical
+dashboard ("Análise histórica") are both built around concrete analytical
+questions.
 
-### In Progress
+**Real-user overview:**
 
-- [ ] Authentication
-  - Sign up
-  - Sign in
-  - Session handling
-  - Sign out
-  - Error handling
-  - User isolation testing
+- How many tasks are pending, in progress, completed, or blocked, and what is the completion rate?
+- How is the check-in state distribution, and how has it evolved recently?
+- What are the average energy, anxiety, and focus levels among check-ins that recorded them?
 
-### Next
+**Synthetic historical dashboard** (using the fictional 90-day demo dataset,
+which includes numeric energy, anxiety, and focus observations while
+intentionally preserving some missing values):
 
-- [ ] Onboarding
-- [ ] Personalization
-- [ ] Task management
-- [ ] Daily check-ins
-- [ ] Adaptive planning
-- [ ] Calendar integration
-- [ ] Calm Mode
-- [ ] Personal analytics
-- [ ] AI assistant
+- Does completion differ by task priority?
+- Does completion differ across energy or focus groups (daily average, low/medium/high)?
+- How does completion vary by weekday?
+- What patterns appear on days that include an "overwhelmed" check-in, compared with other check-in days?
+- How do weekdays compare with weekends, for both task completion and check-in levels?
+- How do energy, anxiety, and focus evolve over the 90-day period?
 
----
+## Synthetic Dataset
 
-## Roadmap
+`data/synthetic/synthetic_checkins.csv` and
+`data/synthetic/synthetic_tasks.csv` are generated by
+`scripts/generate_synthetic_data.py` and are:
 
-```text
-Foundation                 ✅
-     ↓
-Authentication             🚧
-     ↓
-Onboarding
-     ↓
-Task Management
-     ↓
-Daily Check-ins
-     ↓
-Adaptive Planning
-     ↓
-Calendar Integration
-     ↓
-Calm Mode
-     ↓
-Personal Analytics
-     ↓
-AI Assistant
-     ↓
-Beta Testing
-     ↓
-Productization
+- **Reproducible** — a fixed random seed (`random.seed(42)`) produces
+  byte-identical output on every run.
+- **Fixed period** — a fixed 90-day window (2025-01-01 to 2025-03-31),
+  chosen instead of "today" so screenshots and analysis stay reproducible
+  over time.
+- **Entirely fictional** — no real names, emails, user IDs, task titles,
+  or check-ins. Every row is flagged `is_synthetic = True`.
+- **Built for demonstration** — created so the analytics layer and
+  dashboard could be shown without waiting 90 days for real usage to
+  accumulate.
+- **Intentionally patterned** — relationships such as "higher energy tends
+  to go with higher focus" or "overwhelmed check-ins are somewhat more
+  likely on low-energy days" were deliberately encoded during generation,
+  as documented generation assumptions, so the analytics layer has
+  something meaningful to find. These are not medical or psychological
+  claims about real behavior.
+
+## Example Insights
+
+All figures below come from the current synthetic 90-day demo dataset
+(103 check-ins, 210 tasks). They describe the fictional demo dataset only
+and must never be read as findings about real users:
+
+- Overall synthetic task completion: **56.7%**
+- High-priority synthetic tasks: **70.6%** completion
+- High-energy synthetic days: **67.1%** completion vs. low-energy synthetic days: **22.2%**
+- Days with an overwhelmed synthetic check-in: **44.4%** completion vs. other synthetic check-in days: **61.0%**
+- Synthetic weekend completion: **67.2%** vs. synthetic weekday completion: **52.3%**
+
+Every association above is descriptive and observational within the
+synthetic dataset — none of it implies causation, and none of it is a
+finding about real people.
+
+## Grain and Join Design
+
+This is the most important Data Analyst decision in the project.
+
+Check-ins and tasks have different grains: a single day can have zero, one,
+or several check-ins, and separately zero or several tasks. Joining raw
+check-in rows directly to raw task rows on date would create a
+many-to-many join and silently duplicate observations — for example, 3
+check-ins and 4 tasks on the same day would produce 12 joined rows,
+inflating every downstream count.
+
+To avoid this, `services/synthetic_analytics_service.py` first aggregates
+each synthetic dataset to exactly one row per date (`get_daily_checkin_metrics`,
+`get_daily_task_metrics`) and only then merges those two daily tables on
+`date`. The real-user `services/analytics_service.py` computes its current
+metrics separately and does not perform this cross-domain daily merge.
+Analyses that only need one dataset (e.g. completion by priority, or
+check-in metrics by weekday) work directly off the raw rows, since no
+cross-grain join is required there. The synthetic-side aggregation decision
+is unit-tested directly (e.g. confirming that summed daily counts equal the
+raw row counts, and that a merged daily dataset never produces more rows
+than either side).
+
+## Security
+
+- Authentication via Supabase Auth (email/password).
+- Row Level Security (RLS) is the real access-control boundary: every
+  table is scoped to `auth.uid()`, so a user can only ever see their own
+  rows.
+- The app uses a **per-Streamlit-session Supabase client**, restored from
+  the stored access/refresh tokens on every rerun — never a single global
+  or shared client.
+- No `service_role` key is used anywhere in the client application.
+- Auth tokens and passwords are never displayed or logged by the UI.
+- The synthetic dataset never touches Supabase, so it can never leak into
+  or be confused with real user data.
+
+## Tech Stack
+
+- Python
+- Streamlit
+- Supabase (Auth + PostgreSQL)
+- pandas
+- pytest
+- Git / GitHub
+
+## Project Structure
+
+```
+mody-adaptive-planner/
+├── app.py                              # Streamlit UI and routing
+├── styles/
+│   └── style.css                       # Mody design system and responsive CSS
+├── assets/
+│   ├── mody_logo.png                   # Horizontal brand logo (login screen)
+│   └── mody_icon.png                   # Brand icon (favicon, sidebar)
+├── services/
+│   ├── auth_service.py                 # Supabase Auth (sign in/up/out, session restore)
+│   ├── onboarding_service.py           # Profile + personalization preferences
+│   ├── task_service.py                 # Real-user tasks
+│   ├── checkin_service.py              # Real-user check-ins
+│   ├── appointment_service.py          # Real-user appointments (internal calendar)
+│   ├── analytics_service.py            # Real-user analytics (Supabase-backed)
+│   ├── synthetic_analytics_service.py  # Synthetic/demo analytics (CSV-backed)
+│   └── adaptive_service.py             # Deterministic adaptive suggestion rules
+├── scripts/
+│   └── generate_synthetic_data.py      # Reproducible synthetic dataset generator
+├── data/
+│   └── synthetic/
+│       ├── synthetic_checkins.csv
+│       └── synthetic_tasks.csv
+├── tests/
+│   ├── test_synthetic_data.py
+│   ├── test_synthetic_analytics_service.py
+│   ├── test_adaptive_service.py
+│   └── test_appointment_service.py
+└── docs/
+    └── portfolio_notes.md
 ```
 
----
+## Running Locally
 
-## Documentation
+```bash
+python -m venv .venv
 
-Detailed project documentation is available in the `docs/` directory:
+# Windows
+.venv\Scripts\activate
 
-```text
-docs/
-├── PROJECT_OVERVIEW.md
-├── DATABASE.md
-├── ARCHITECTURE.md
-└── ROADMAP.md
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+
+python -m streamlit run app.py
 ```
 
-### Project Overview
+Streamlit secrets (`.streamlit/secrets.toml`, not committed) should contain
+your Supabase project URL and **publishable/anon** key only — never a
+`service_role` key. No real secret values are included in this repository
+or in this README.
 
-`docs/PROJECT_OVERVIEW.md`
+## Tests
 
-Contains the complete product concept, features, analytics strategy and long-term vision.
-
-### Database
-
-`docs/DATABASE.md`
-
-Documents the database model, user data isolation and historical data strategy.
-
-### Architecture
-
-`docs/ARCHITECTURE.md`
-
-Documents the application architecture and technical decisions.
-
-### Roadmap
-
-`docs/ROADMAP.md`
-
-Contains the detailed development phases and milestones.
-
----
-
-## Development Philosophy
-
-Mody is being developed incrementally:
-
-```text
-Build
-  ↓
-Test
-  ↓
-Collect feedback
-  ↓
-Learn
-  ↓
-Improve
+```bash
+python -m pytest -v
 ```
 
-The current priority is validating the core product before introducing advanced AI, monetization or large-scale infrastructure.
+## Current MVP vs. Future Development
 
----
+### Current MVP
 
-## Initial Market
+The following features are implemented and working:
 
-The first planned market is **Brazil**, with the application initially available in **Portuguese (pt-BR)**.
+- Supabase Auth (sign in, sign up, session restore, logout)
+- User onboarding and personalization preferences
+- Task management (create, complete, track status)
+- Check-ins (self-reported state)
+- **Internal appointment calendar** — create, view upcoming, and delete appointments; next appointment displayed on the Today page
+- Real-user analytics overview (task KPIs, check-in distribution, recent evolution)
+- Synthetic historical behavioral analytics (90-day demo dataset)
+- Deterministic, rule-based adaptive planning suggestions
+- Responsive web interface (desktop, tablet, and narrow mobile layouts)
+- Custom Mody visual identity (branding, favicon, calm design system)
 
-Monetization is intentionally outside the current MVP.
+### Future Development
 
----
+The following are intentionally outside the current MVP scope:
 
-## Project Vision
+#### External Calendar Synchronization
 
-Mody is not intended to become simply another to-do list.
+Future integration with external calendar services (e.g. Google Calendar)
+to synchronize appointments bidirectionally. The current internal calendar
+is independent and self-contained.
 
-The long-term goal is to create a planning system that recognizes an important distinction:
+#### WhatsApp Companion
 
-> **Available time and available capacity are not always the same thing.**
+A future low-friction interaction layer via WhatsApp could allow users to:
 
-Mody should eventually help users answer not only:
+- complete a quick daily check-in
+- ask what is planned for today
+- check the next upcoming appointment
+- quickly create a task or appointment
+- receive planning or reminder prompts
 
-> What do I need to do today?
+Conceptually, this would route through a webhook to the same Supabase
+user data, making Mody accessible without opening a browser. **Not
+implemented in the current MVP.**
 
-but also:
+#### Notifications and Reminders
 
-> What is realistically manageable today?
+Future push or scheduled reminders for upcoming appointments and pending
+tasks. Not currently implemented.
 
-and, over time:
+#### Natural Language Input
 
-> What can my own history teach me about how I plan and manage my time?
+Future ability to create tasks or appointments through conversational text
+(e.g. "add a meeting tomorrow at 10am"). Not currently implemented.
+
+#### Longitudinal Analytics
+
+As real usage accumulates, the real-user analytics layer can be extended
+with longitudinal behavioral analysis. Current historical analytics remain
+synthetic/demo only.
+
+#### Optional AI Assistance
+
+A future optional AI layer could provide richer planning suggestions. The
+current adaptive suggestions are entirely deterministic and rule-based —
+no AI or machine learning is involved.
+
+#### Mobile / PWA Experience
+
+The current interface is a responsive web application usable on mobile
+browsers. A future evolution could package this as a Progressive Web App
+or native-wrapper experience for a more app-like feel on mobile devices.
+
+## Disclaimer
+
+Mody is a productivity and planning support tool. It is **not** a
+diagnostic tool, medical application, psychological assessment, or
+treatment tool. The historical analytics dashboard is built entirely from
+a **fictional, synthetic** 90-day dataset created for portfolio
+demonstration; it does not represent real users, and any association
+described in that dashboard (e.g. between energy and task completion) is
+descriptive only — never a causal or medical claim.

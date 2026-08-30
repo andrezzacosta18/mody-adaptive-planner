@@ -1,4 +1,5 @@
 import html
+import datetime
 
 import pandas as pd
 import streamlit as st
@@ -10,20 +11,40 @@ from services.onboarding_service import (
     save_preferences,
     save_profile,
 )
-from services.checkin_service import create_checkin
+from services.checkin_service import create_checkin, get_checkins
 from services.task_service import complete_task, get_tasks
+from services.appointment_service import (
+    create_appointment,
+    delete_appointment,
+    get_appointments,
+    get_next_appointment,
+)
 from services.analytics_service import (
     get_task_metrics,
     get_checkin_metrics,
     get_checkin_state_distribution,
     get_checkin_timeseries,
 )
+from services.adaptive_service import get_adaptive_suggestion
+from services.synthetic_analytics_service import (
+    get_overall_task_metrics as get_synthetic_overall_task_metrics,
+    get_completion_by_priority as get_synthetic_completion_by_priority,
+    get_completion_by_weekday as get_synthetic_completion_by_weekday,
+    get_checkin_state_distribution as get_synthetic_checkin_state_distribution,
+    get_checkin_timeseries as get_synthetic_checkin_timeseries,
+    get_completion_by_energy as get_synthetic_completion_by_energy,
+    get_completion_by_focus as get_synthetic_completion_by_focus,
+    get_completion_by_overwhelmed_state as get_synthetic_completion_by_overwhelmed_state,
+    get_weekday_vs_weekend_metrics as get_synthetic_weekday_vs_weekend_metrics,
+)
 
-# --- Basic page configuration ---
+# =========================================================
+# Page config
+# =========================================================
 st.set_page_config(
     page_title="Mody — Hoje",
-    page_icon="🌿",
-    layout="centered",
+    page_icon="assets/mody_icon.png",
+    layout="wide",
 )
 
 
@@ -36,14 +57,8 @@ def load_css(path: str) -> None:
 
 load_css("styles/style.css")
 
-
 # =========================================================
-# Portuguese (UI) <-> internal database value mappings
-#
-# Kept here (not in onboarding_service.py) because this is
-# purely a presentation concern: the service only ever deals
-# with the internal values already validated by the database
-# constraints.
+# Lookup tables
 # =========================================================
 SUPPORT_PROFILE_OPTIONS = {
     "TDAH": "adhd",
@@ -52,9 +67,7 @@ SUPPORT_PROFILE_OPTIONS = {
     "Nenhum desses": "none",
     "Prefiro não informar": "prefer_not_to_say",
 }
-SUPPORT_PROFILE_REVERSE = {
-    v: k for k, v in SUPPORT_PROFILE_OPTIONS.items()
-}
+SUPPORT_PROFILE_REVERSE = {v: k for k, v in SUPPORT_PROFILE_OPTIONS.items()}
 
 SUPPORT_NEEDS_OPTIONS = {
     "Começar tarefas": "start_tasks",
@@ -68,44 +81,51 @@ SUPPORT_NEEDS_OPTIONS = {
 }
 SUPPORT_NEEDS_REVERSE = {v: k for k, v in SUPPORT_NEEDS_OPTIONS.items()}
 
+PRIORITY_LABELS_PT = {"low": "Baixa", "medium": "Média", "high": "Alta"}
+
+CHECKIN_STATE_LABELS_PT = {
+    "well": "Bem",
+    "overwhelmed": "Sobrecarregada",
+    "calm_needed": "Preciso me acalmar",
+}
+
+SYNTHETIC_LEVEL_GROUP_LABELS_PT = {"Low": "Baixa", "Medium": "Média", "High": "Alta"}
+SYNTHETIC_WEEKDAY_LABELS_PT = {
+    "Monday": "Segunda", "Tuesday": "Terça", "Wednesday": "Quarta",
+    "Thursday": "Quinta", "Friday": "Sexta", "Saturday": "Sábado", "Sunday": "Domingo",
+}
+SYNTHETIC_OVERWHELMED_LABELS_PT = {
+    "Days with overwhelmed check-in": "Com check-in sobrecarregada",
+    "Other check-in days": "Outros dias com check-in",
+}
+SYNTHETIC_WEEKDAY_VS_WEEKEND_LABELS_PT = {"Weekday": "Dia de semana", "Weekend": "Fim de semana"}
 
 # =========================================================
 # Auth state
 #
-# st.session_state.auth holds only what's needed to restore
-# the session across Streamlit reruns: access_token,
-# refresh_token, user_id and email. NEVER the password.
+# st.session_state.auth holds only what is needed to restore
+# the session across reruns. NEVER stores the password.
 # =========================================================
 if "auth" not in st.session_state:
     st.session_state.auth = None
 
 
 def is_authenticated() -> bool:
-    """
-    Checks whether a session is stored and, if so, restores it
-    on the session-specific Supabase client (needed on every
-    rerun so that RLS policies can resolve auth.uid() correctly).
-
-    If the token is invalid/expired, clears local auth state and
-    treats the user as logged out.
-    """
+    """Restore the per-session Supabase client on every rerun so RLS
+    can resolve auth.uid(). Clears state and returns False when the
+    token is invalid or expired."""
     auth = st.session_state.auth
     if auth is None:
         return False
-
     ok = restore_session(auth["access_token"], auth["refresh_token"])
     if not ok:
         st.session_state.auth = None
         return False
-
     return True
 
 
 def start_session(session) -> None:
-    """Stores the minimum session data needed after a successful
-    sign-in or sign-up. Called only with a Supabase `session`
-    object that already has a valid user (never with manually
-    entered data)."""
+    """Store minimum session data after a successful sign-in or sign-up."""
     st.session_state.auth = {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -115,11 +135,97 @@ def start_session(session) -> None:
 
 
 # =========================================================
+# Shared rendering helpers
+# =========================================================
+def _render_page_header(title: str, description: str) -> None:
+    """One consistent title + description block at the top of every page.
+    Both values are html.escape()d before interpolation since description
+    can carry a user-controlled display_name on some pages.
+    """
+    st.markdown(
+        '<div class="page-header">'
+        f'<h1 class="page-title">{html.escape(str(title))}</h1>'
+        f'<p class="page-description">{html.escape(str(description))}</p>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _format_appointment_date(event_date) -> str:
+    """ISO date → DD/MM/YYYY. Graceful fallback on parse failure."""
+    try:
+        parsed = datetime.date.fromisoformat(str(event_date))
+        return parsed.strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return str(event_date)
+
+
+def _format_appointment_date_short(event_date) -> str:
+    """ISO date → 'DD MMM' in Portuguese for the agenda date anchor,
+    e.g. '31 AGO'. Graceful fallback on parse failure."""
+    _MONTHS_PT = {
+        1: "JAN", 2: "FEV", 3: "MAR", 4: "ABR", 5: "MAI", 6: "JUN",
+        7: "JUL", 8: "AGO", 9: "SET", 10: "OUT", 11: "NOV", 12: "DEZ",
+    }
+    try:
+        parsed = datetime.date.fromisoformat(str(event_date))
+        return f"{parsed.day} {_MONTHS_PT[parsed.month]}"
+    except (ValueError, TypeError):
+        return str(event_date)
+
+
+def _format_appointment_time(event_time) -> str:
+    """Stored TIME value → HH:MM. Graceful fallback."""
+    try:
+        raw = str(event_time)[:8]
+        parsed = datetime.time.fromisoformat(raw)
+        return parsed.strftime("%H:%M")
+    except (ValueError, TypeError):
+        return str(event_time)
+
+
+def _compact_task_meta(task: dict) -> str:
+    """Builds a single compact metadata string such as 'Alta · 45 min · vence 02/09'
+    from the task's priority, estimated_minutes and due_date, omitting any
+    field that is not present.  All interpolated values are from validated
+    database columns (not free text) but are still passed through
+    html.escape() for consistency with the rest of the HTML in this file."""
+    parts = []
+    if task.get("priority"):
+        label = PRIORITY_LABELS_PT.get(task["priority"], task["priority"])
+        parts.append(html.escape(str(label)))
+    if task.get("estimated_minutes"):
+        parts.append(html.escape(str(task["estimated_minutes"])) + " min")
+    if task.get("due_date"):
+        # Shorten YYYY-MM-DD to DD/MM for the compact line
+        try:
+            parsed = datetime.date.fromisoformat(str(task["due_date"]))
+            parts.append("vence " + html.escape(parsed.strftime("%d/%m")))
+        except (ValueError, TypeError):
+            parts.append("vence " + html.escape(str(task["due_date"])))
+    return " · ".join(parts) if parts else ""
+
+
+# =========================================================
 # Screen: Login / Sign up
 # =========================================================
 def show_login() -> None:
-    st.title("Mody")
-    st.caption("Organização, gestão de tempo e autorregulação.")
+    # Center the auth area at ~460px so it does not stretch
+    # across the full 1050px content column on wide layout.
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+
+    # Mody logo — centered, ~220px wide, responsive on mobile.
+    # st.image handles local file paths natively; no base64 embedding
+    # is needed. The logo already contains the brand name so no
+    # additional "Mody" heading is rendered beside it.
+    col_l, col_logo, col_r = st.columns([1, 2, 1])
+    with col_logo:
+        st.image("assets/mody_logo.png", use_container_width=True)
+
+    st.markdown(
+        '<div class="login-tagline">Um jeito mais leve de organizar o dia.</div>',
+        unsafe_allow_html=True,
+    )
 
     login_tab, signup_tab = st.tabs(["Entrar", "Criar conta"])
 
@@ -128,7 +234,6 @@ def show_login() -> None:
             email = st.text_input("E-mail", key="login_email")
             password = st.text_input("Senha", type="password", key="login_password")
             submitted = st.form_submit_button("Entrar", use_container_width=True)
-
         if submitted:
             if not email or not password:
                 st.warning("Preencha e-mail e senha.")
@@ -145,7 +250,6 @@ def show_login() -> None:
             email = st.text_input("E-mail", key="signup_email")
             password = st.text_input("Senha", type="password", key="signup_password")
             submitted = st.form_submit_button("Criar conta", use_container_width=True)
-
         if submitted:
             if not email or not password:
                 st.warning("Preencha e-mail e senha.")
@@ -159,20 +263,20 @@ def show_login() -> None:
                         "o cadastro antes de entrar."
                     )
                 else:
-                    # Project configured without requiring email
-                    # confirmation: a session is already available.
                     start_session(result["session"])
                     st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================================================
 # Screen: Onboarding
 # =========================================================
 def show_onboarding(user_id: str) -> None:
-    st.title("Vamos te conhecer melhor")
-    st.caption(
+    _render_page_header(
+        "Vamos te conhecer melhor",
         "Só o essencial para o Mody começar a se adaptar a você. "
-        "Tudo aqui pode ser ajustado depois."
+        "Tudo aqui pode ser ajustado depois.",
     )
 
     existing_data = get_existing_data(user_id)
@@ -181,7 +285,6 @@ def show_onboarding(user_id: str) -> None:
 
     st.divider()
 
-    # ---- Section 1: Profile ----
     st.subheader("Como você gostaria de ser chamado(a)?")
     display_name = st.text_input(
         "Nome",
@@ -199,7 +302,6 @@ def show_onboarding(user_id: str) -> None:
 
     st.divider()
 
-    # ---- Section 2: Personalization (optional) ----
     st.subheader(
         "Existe algo que você gostaria que o Mody levasse em "
         "consideração ao organizar seu dia?"
@@ -223,11 +325,6 @@ def show_onboarding(user_id: str) -> None:
         index=default_index,
         label_visibility="collapsed",
     )
-    # None enquanto o usuário não clicar em nenhuma opção: ausência de
-    # resposta não deve ser tratada como "adhd" (primeira opção da
-    # lista) nem como qualquer outro valor. Só vira um valor real
-    # quando o usuário escolhe ativamente uma opção — inclusive
-    # "Prefiro não informar", que é uma resposta diferente de None.
     support_profile = (
         SUPPORT_PROFILE_OPTIONS[chosen_profile_label]
         if chosen_profile_label is not None
@@ -236,7 +333,6 @@ def show_onboarding(user_id: str) -> None:
 
     st.divider()
 
-    # ---- Section 3: Support needs ----
     st.subheader("Com o que você mais gostaria de ajuda no dia a dia?")
 
     current_needs_values = existing_preferences.get("support_needs") or []
@@ -265,10 +361,7 @@ def show_onboarding(user_id: str) -> None:
 
     if st.button("Concluir", type="primary", use_container_width=True):
         profile_result = save_profile(user_id, display_name, timezone)
-        preferences_result = save_preferences(
-            user_id, support_profile, support_needs
-        )
-
+        preferences_result = save_preferences(user_id, support_profile, support_needs)
         if not profile_result["success"]:
             st.error(profile_result["error"])
         elif not preferences_result["success"]:
@@ -279,111 +372,104 @@ def show_onboarding(user_id: str) -> None:
 
 
 # =========================================================
-# Screen: Home
-#
-# The current task card now shows a real pending task from
-# services/task_service.py. The "next appointment" card is
-# still mock data — real calendar integration is a later phase.
+# Screen: Today ("Hoje")
 # =========================================================
-PRIORITY_LABELS_PT = {"low": "Baixa", "medium": "Média", "high": "Alta"}
+def _get_latest_checkin_state_and_levels(user_id: str):
+    """Latest real check-in state/levels for the adaptive suggestion.
+    Returns (state, energy_level, focus_level), each None when absent.
+    Always from real Supabase data via the per-session client; never
+    from the synthetic dataset.
+    """
+    result = get_checkins(user_id, limit=1)
+    if not result["success"] or not result["data"]:
+        return None, None, None
+    latest = result["data"][0]
+    return latest.get("state"), latest.get("energy_level"), latest.get("focus_level")
 
 
-def _render_current_task_card(task: dict | None) -> str:
-    """Builds the HTML for the 'Tarefa atual' card: either the
-    current pending task's details, or a friendly empty-state
-    message when there are none. Uses inline styles for the
-    secondary detail lines to avoid adding new classes to
-    styles/style.css.
+def _render_appointment_snippet(appointment: dict | None) -> str:
+    """Small inline appointment display for the 'Seu dia' left column.
+    Uses _format_appointment_date_short() for a human-friendly '31 AGO'
+    style date on the Today page. Escapes every user-controlled field (title).
+    """
+    if appointment is None:
+        return (
+            '<div class="day-col-label">Próximo compromisso</div>'
+            '<div class="day-col-empty">Seu dia está livre por enquanto.</div>'
+        )
+    safe_title = html.escape(str(appointment.get("title", "")))
+    fmt_date = _format_appointment_date_short(appointment.get("event_date", ""))
+    fmt_time = _format_appointment_time(appointment.get("event_time", ""))
+    return (
+        '<div class="day-col-label">Próximo compromisso</div>'
+        f'<div class="day-col-value">{safe_title}</div>'
+        f'<div class="day-col-meta">{html.escape(fmt_date)} · {html.escape(fmt_time)}</div>'
+    )
 
-    Security: task fields (title, description, priority, due_date)
-    come from the database and are ultimately user-controlled input
-    (the person types the title/description themselves). Since this
-    HTML is rendered with unsafe_allow_html=True, every such value
-    MUST be escaped with html.escape() before interpolation, or a
-    task title/description containing HTML/JS would be rendered as
-    live markup instead of plain text (stored XSS).
+
+def _render_task_snippet(task: dict | None) -> str:
+    """Small inline task display for the 'Seu dia' right column.
+    Escapes every user-controlled field (title, description, due_date
+    when used). Priority and estimated_minutes come from validated DB
+    columns but are still escaped for consistency.
     """
     if task is None:
         return (
-            '<div class="card">'
-            '<div class="card-label">Tarefa atual</div>'
-            '<div class="card-value">Nenhuma tarefa pendente por enquanto.</div>'
-            "</div>"
+            '<div class="day-col-label">Tarefa atual</div>'
+            '<div class="day-col-empty">Nenhuma tarefa pendente.</div>'
         )
-
-    detail_style = "font-size:0.85rem;color:#6b7d76;margin-top:0.3rem;"
-    details = []
-
+    safe_title = html.escape(str(task.get("title", "")))
+    meta = _compact_task_meta(task)
+    desc_html = ""
     if task.get("description"):
-        safe_description = html.escape(str(task["description"]))
-        details.append(f'<div style="{detail_style}">{safe_description}</div>')
-    if task.get("priority"):
-        priority_label = PRIORITY_LABELS_PT.get(task["priority"], task["priority"])
-        safe_priority_label = html.escape(str(priority_label))
-        details.append(f'<div style="{detail_style}">Prioridade: {safe_priority_label}</div>')
-    if task.get("estimated_minutes"):
-        # estimated_minutes is a validated positive integer (see
-        # task_service.py), not free text, but str() + escape kept
-        # for consistency rather than trusting a raw interpolation.
-        safe_minutes = html.escape(str(task["estimated_minutes"]))
-        details.append(
-            f'<div style="{detail_style}">Tempo estimado: {safe_minutes} min</div>'
-        )
-    if task.get("due_date"):
-        safe_due_date = html.escape(str(task["due_date"]))
-        details.append(f'<div style="{detail_style}">Vence em: {safe_due_date}</div>')
-
-    safe_title = html.escape(str(task["title"]))
-
+        desc_html = f'<div class="day-col-desc">{html.escape(str(task["description"]))}</div>'
+    meta_html = f'<div class="day-col-meta">{meta}</div>' if meta else ""
     return (
-        '<div class="card">'
-        '<div class="card-label">Tarefa atual</div>'
-        f'<div class="card-value">{safe_title}</div>'
-        + "".join(details)
-        + "</div>"
+        '<div class="day-col-label">Tarefa atual</div>'
+        f'<div class="day-col-value">{safe_title}</div>'
+        f"{desc_html}"
+        f"{meta_html}"
     )
 
 
 def show_home(user_id: str, display_name: str | None) -> None:
-    col_title, col_logout = st.columns([4, 1])
-    with col_title:
-        st.title("Hoje")
-    with col_logout:
-        st.write("")
-        if st.button("Sair", use_container_width=True):
-            sign_out()
-            st.session_state.clear()
-            st.rerun()
-
     greeting_name = display_name or "você"
-    st.caption(f"Olá, {greeting_name}")
 
-    # --- Current task: real pending task from task_service.py ---
+    # Spec item 10: specific greeting copy for Today page.
+    st.markdown(
+        '<div class="page-header">'
+        f'<h1 class="page-title">Hoje</h1>'
+        f'<p class="page-greeting">Olá, {html.escape(str(greeting_name))}.</p>'
+        '<p class="page-description">Vamos cuidar do que importa, uma coisa de cada vez.</p>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --- Load real task data ---
     tasks_result = get_tasks(user_id, status="pending")
     if not tasks_result["success"]:
         st.error(tasks_result["error"])
         current_task = None
+        pending_task_count = None
     else:
         pending_tasks = tasks_result["data"]
         current_task = pending_tasks[0] if pending_tasks else None
+        pending_task_count = len(pending_tasks)
 
-    # --- Next appointment: still mock data (calendar is a later phase) ---
-    next_appointment = "Consulta médica às 15h00"
-
+    # --- Session state ---
     if "checkin_state" not in st.session_state:
         st.session_state.checkin_state = None
     if "checkin_just_saved" not in st.session_state:
         st.session_state.checkin_just_saved = False
-    if "action_message" not in st.session_state:
-        st.session_state.action_message = None
     if "task_just_completed" not in st.session_state:
         st.session_state.task_just_completed = False
 
-    st.write("**Como você está agora?**")
+    # --- Check-in ---
+    st.markdown('<p class="section-question">Como você está agora?</p>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("🟢 Bem", use_container_width=True):
+        if st.button("🙂 Estou bem", use_container_width=True):
             result = create_checkin(user_id=user_id, state="well")
             if result["success"]:
                 st.session_state.checkin_state = "well"
@@ -391,7 +477,7 @@ def show_home(user_id: str, display_name: str | None) -> None:
             else:
                 st.error(result["error"])
     with col2:
-        if st.button("🟡 Sobrecarregada", use_container_width=True):
+        if st.button("😮‍💨 Estou sobrecarregada", use_container_width=True):
             result = create_checkin(user_id=user_id, state="overwhelmed")
             if result["success"]:
                 st.session_state.checkin_state = "overwhelmed"
@@ -399,7 +485,7 @@ def show_home(user_id: str, display_name: str | None) -> None:
             else:
                 st.error(result["error"])
     with col3:
-        if st.button("🔴 Preciso me acalmar", use_container_width=True):
+        if st.button("🌿 Quero desacelerar", use_container_width=True):
             result = create_checkin(user_id=user_id, state="calm_needed")
             if result["success"]:
                 st.session_state.checkin_state = "calm_needed"
@@ -412,126 +498,264 @@ def show_home(user_id: str, display_name: str | None) -> None:
         st.session_state.checkin_just_saved = False
 
     if st.session_state.checkin_state == "well":
-        st.markdown('<div class="resposta-suave">Que bom. Vamos seguir com o seu dia.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="resposta-suave">Que bom. Vamos seguir com o seu dia.</div>',
+            unsafe_allow_html=True,
+        )
     elif st.session_state.checkin_state == "overwhelmed":
-        st.markdown('<div class="resposta-suave">Entendido. Vamos manter a tela mais simples possível.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="resposta-suave">Entendido. Vamos manter a tela mais simples possível.</div>',
+            unsafe_allow_html=True,
+        )
     elif st.session_state.checkin_state == "calm_needed":
-        st.markdown('<div class="resposta-suave">Tudo bem. O Modo Acalmar ainda será construído — por enquanto, respire.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="resposta-suave">Entendido. Considere reduzir o ritmo e escolher o próximo passo com calma.</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.write("")
+    st.markdown('<div class="checkin-to-suggestion-gap"></div>', unsafe_allow_html=True)
 
-    if st.session_state.task_just_completed:
-        st.success("Tarefa concluída! 🎉")
-        st.session_state.task_just_completed = False
-
-    st.markdown(_render_current_task_card(current_task), unsafe_allow_html=True)
-
-    if current_task is not None:
-        if st.button("Concluir", key="complete_current_task"):
-            result = complete_task(user_id, current_task["id"])
-            if result["success"]:
-                st.session_state.task_just_completed = True
-                st.rerun()
-            else:
-                st.error(result["error"])
-
+    # --- Adaptive suggestion ("✦ PARA AGORA" label) ---
+    latest_state, latest_energy, latest_focus = _get_latest_checkin_state_and_levels(user_id)
+    suggestion = get_adaptive_suggestion(
+        checkin_state=latest_state,
+        energy_level=latest_energy,
+        focus_level=latest_focus,
+        pending_task_count=pending_task_count,
+    )
+    safe_suggestion_title = html.escape(str(suggestion["title"]))
+    safe_suggestion_message = html.escape(str(suggestion["message"]))
+    safe_suggestion_action = html.escape(str(suggestion["recommended_action"]))
     st.markdown(
-        f"""
-        <div class="card">
-            <div class="card-label">Próximo compromisso</div>
-            <div class="card-value">{next_appointment}</div>
-        </div>
-        """,
+        '<div class="para-agora">'
+        '<div class="para-agora-label">✦ PARA AGORA</div>'
+        f'<div class="para-agora-title">{safe_suggestion_title}</div>'
+        f'<div class="para-agora-message">{safe_suggestion_message}</div>'
+        f'<div class="para-agora-action">{safe_suggestion_action}</div>'
+        "</div>",
         unsafe_allow_html=True,
     )
 
     st.write("")
 
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        if st.button("▶️ Começar", use_container_width=True):
-            st.session_state.action_message = "start"
-    with col_b:
-        if st.button("🚫 Não consigo começar", use_container_width=True):
-            st.session_state.action_message = "cant_start"
-    with col_c:
-        if st.button("🌬️ Preciso me acalmar", use_container_width=True):
-            st.session_state.action_message = "calm_mode"
+    # --- "Seu dia" two-column layout (spec item 1) ---
+    # Load real appointment data. Never the synthetic dataset.
+    next_appointment_result = get_next_appointment(user_id)
+    if not next_appointment_result["success"]:
+        st.error(next_appointment_result["error"])
+        next_appointment = None
+    else:
+        next_appointment = next_appointment_result["data"]
 
-    if st.session_state.action_message == "start":
-        st.markdown('<div class="resposta-suave">Ótimo — a lógica de iniciar a tarefa será construída em uma próxima etapa.</div>', unsafe_allow_html=True)
-    elif st.session_state.action_message == "cant_start":
-        st.markdown('<div class="resposta-suave">Sem problema. O fluxo "Não consigo começar" ainda será construído.</div>', unsafe_allow_html=True)
-    elif st.session_state.action_message == "calm_mode":
-        st.markdown('<div class="resposta-suave">O Modo Acalmar ainda será construído nas próximas etapas.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="seu-dia-heading">Seu dia</div>', unsafe_allow_html=True)
+
+    left_col, right_col = st.columns(2)
+
+    with left_col:
+        # Left: next appointment card
+        appt_inner_html = _render_appointment_snippet(next_appointment)
+        st.markdown(
+            f'<div class="day-col-card">{appt_inner_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with right_col:
+        # Right: current task card + complete button
+        task_inner_html = _render_task_snippet(current_task)
+        st.markdown(
+            f'<div class="day-col-card">{task_inner_html}</div>',
+            unsafe_allow_html=True,
+        )
+        if st.session_state.task_just_completed:
+            st.success("Tarefa concluída! 🎉")
+            st.session_state.task_just_completed = False
+        if current_task is not None:
+            if st.button("Concluir", key="complete_current_task", type="primary"):
+                result = complete_task(user_id, current_task["id"])
+                if result["success"]:
+                    st.session_state.task_just_completed = True
+                    st.rerun()
+                else:
+                    st.error(result["error"])
 
 
 # =========================================================
-# Screen: Overview / Dashboard ("Visão geral")
-#
-# Read-only screen built entirely from services/analytics_service.py.
-# app.py never computes metrics itself and never touches Supabase
-# directly for analytics. Each section calls exactly one analytics
-# function and checks its own "success" flag, so a single failing
-# call only breaks its own section — the others still render.
-#
-# user_id is always the authenticated session's id (passed in by the
-# router); this screen never lets it be edited.
+# Screen: Calendar ("Calendário")
 # =========================================================
-CHECKIN_STATE_LABELS_PT = {
-    "well": "Bem",
-    "overwhelmed": "Sobrecarregada",
-    "calm_needed": "Preciso me acalmar",
-}
+def show_calendar(user_id: str, display_name: str | None) -> None:
+    # Spec item 3: changed description copy
+    _render_page_header(
+        "Calendário",
+        "Um espaço tranquilo para organizar o que vem pela frente.",
+    )
+
+    if "appointment_just_saved" not in st.session_state:
+        st.session_state.appointment_just_saved = False
+    if "appointment_just_deleted" not in st.session_state:
+        st.session_state.appointment_just_deleted = False
+
+    if st.session_state.appointment_just_saved:
+        st.success("Compromisso adicionado.")
+        st.session_state.appointment_just_saved = False
+    if st.session_state.appointment_just_deleted:
+        st.success("Compromisso excluído.")
+        st.session_state.appointment_just_deleted = False
+
+    # Spec item 3: form inside an expander — not permanently open.
+    with st.expander("＋ Novo compromisso"):
+        with st.form("new_appointment_form", clear_on_submit=True):
+            title = st.text_input("Título")
+            date_col, time_col = st.columns(2)
+            with date_col:
+                event_date = st.date_input("Data")
+            with time_col:
+                event_time = st.time_input("Hora")
+            notes = st.text_area("Observação", value="")
+            submitted = st.form_submit_button(
+                "Adicionar compromisso", use_container_width=True, type="primary"
+            )
+
+    if submitted:
+        result = create_appointment(
+            user_id=user_id,
+            title=title,
+            event_date=event_date,
+            event_time=event_time,
+            notes=notes or None,
+        )
+        if not result["success"]:
+            st.error(result["error"])
+        else:
+            st.session_state.appointment_just_saved = True
+            st.rerun()
+
+    st.write("")
+
+    # --- Upcoming appointments as a calm agenda/timeline (spec item 4) ---
+    appointments_result = get_appointments(user_id, upcoming_only=True)
+    if not appointments_result["success"]:
+        st.error(appointments_result["error"])
+        return
+
+    appointments = appointments_result["data"]
+    if not appointments:
+        st.markdown(
+            '<div class="agenda-empty">Nenhum compromisso futuro.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Render each appointment as a lightweight agenda timeline entry.
+    # The date anchor is the visual anchor; time and title follow on
+    # the same line. The delete action stays visually secondary in a
+    # narrow right column.  Every user-controlled field is escaped.
+    for appointment in appointments:
+        short_date = _format_appointment_date_short(appointment.get("event_date", ""))
+        fmt_time = _format_appointment_time(appointment.get("event_time", ""))
+        safe_title = html.escape(str(appointment.get("title", "")))
+        note_html = ""
+        if appointment.get("notes"):
+            safe_notes = html.escape(str(appointment["notes"]))
+            note_html = f'<div class="agenda-entry-note">{safe_notes}</div>'
+
+        content_col, delete_col = st.columns([8, 1])
+        with content_col:
+            st.markdown(
+                '<div class="agenda-timeline">'
+                f'<div class="agenda-date-anchor">{html.escape(short_date)}</div>'
+                '<div class="agenda-time-title-row">'
+                f'<span class="agenda-time">{html.escape(fmt_time)}</span>'
+                f'<span class="agenda-entry-title">{safe_title}</span>'
+                "</div>"
+                f"{note_html}"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with delete_col:
+            if st.button(
+                "✕",
+                key=f"delete_appointment_{appointment['id']}",
+                help="Excluir compromisso",
+            ):
+                delete_result = delete_appointment(user_id, appointment["id"])
+                if not delete_result["success"]:
+                    st.error(delete_result["error"])
+                else:
+                    st.session_state.appointment_just_deleted = True
+                    st.rerun()
+
+        st.markdown('<hr class="agenda-divider" />', unsafe_allow_html=True)
 
 
+# =========================================================
+# Screen: Overview ("Visão geral")
+# =========================================================
 def _format_average(value) -> str:
-    """Check-in averages can be None when there is no numeric data.
-    Show 'Sem dados' instead of a misleading 0, and never interpret
-    the number (no "energia baixa" etc.) — descriptive only."""
+    """None → 'Sem dados'. Never coerces missing check-in levels to 0."""
     return "Sem dados" if value is None else str(value)
 
 
-def show_overview(user_id: str, display_name: str | None) -> None:
-    st.title("Visão geral")
-    greeting_name = display_name or "você"
-    st.caption(f"Um resumo do seu progresso, {greeting_name}.")
+def _render_metric_row(metrics: list[tuple[str, str]]) -> None:
+    """Render a lightweight numeric-stat row without st.metric's card
+    appearance. metrics is a list of (value, label) tuples.
+    Values and labels are static strings (not user-controlled) so
+    no escaping is needed here, but we escape them anyway for
+    consistent discipline.
+    """
+    items_html = "".join(
+        f'<div class="metric-item">'
+        f'<div class="metric-value">{html.escape(str(v))}</div>'
+        f'<div class="metric-label">{html.escape(str(l))}</div>'
+        f"</div>"
+        for v, l in metrics
+    )
+    st.markdown(
+        f'<div class="metric-row">{items_html}</div>',
+        unsafe_allow_html=True,
+    )
 
-    # ---- Section 1: Task KPIs ----
+
+def show_overview(user_id: str, display_name: str | None) -> None:
+    greeting_name = display_name or "você"
+    _render_page_header("Visão geral", f"Um resumo leve do seu progresso, {greeting_name}.")
+
+    # ---- Task KPIs (spec item 6: lightweight, no card boxes) ----
     st.subheader("Tarefas")
     task_result = get_task_metrics(user_id)
     if not task_result["success"]:
         st.error(task_result["error"])
     else:
-        task_data = task_result["data"]
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de tarefas", task_data["total_tasks"])
-        col2.metric("Pendentes", task_data["pending_tasks"])
-        col3.metric("Concluídas", task_data["completed_tasks"])
-        col4.metric("Taxa de conclusão", f"{task_data['completion_rate']}%")
-        if task_data["total_tasks"] == 0:
+        d = task_result["data"]
+        _render_metric_row([
+            (d["total_tasks"], "Tarefas"),
+            (d["pending_tasks"], "Pendentes"),
+            (d["completed_tasks"], "Concluídas"),
+            (f"{d['completion_rate']}%", "Conclusão"),
+        ])
+        if d["total_tasks"] == 0:
             st.info("Ainda não há tarefas registradas.")
 
     st.divider()
 
-    # ---- Section 2: Check-in KPIs ----
+    # ---- Check-in KPIs ----
     st.subheader("Check-ins")
     checkin_result = get_checkin_metrics(user_id)
     if not checkin_result["success"]:
         st.error(checkin_result["error"])
     else:
-        checkin_data = checkin_result["data"]
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de check-ins", checkin_data["total_checkins"])
-        col2.metric("Energia média", _format_average(checkin_data["average_energy"]))
-        col3.metric("Ansiedade média", _format_average(checkin_data["average_anxiety"]))
-        col4.metric("Foco médio", _format_average(checkin_data["average_focus"]))
-        if checkin_data["total_checkins"] == 0:
+        d = checkin_result["data"]
+        _render_metric_row([
+            (d["total_checkins"], "Total"),
+            (_format_average(d["average_energy"]), "Energia média"),
+            (_format_average(d["average_anxiety"]), "Ansiedade média"),
+            (_format_average(d["average_focus"]), "Foco médio"),
+        ])
+        if d["total_checkins"] == 0:
             st.info("Ainda não há check-ins registrados.")
 
     st.divider()
 
-    # ---- Section 3: Check-in distribution (bar chart) ----
+    # ---- Distribution chart ----
     st.subheader("Distribuição dos check-ins")
     distribution_result = get_checkin_state_distribution(user_id)
     if not distribution_result["success"]:
@@ -542,22 +766,18 @@ def show_overview(user_id: str, display_name: str | None) -> None:
         if total_checkins == 0:
             st.info("Ainda não há check-ins registrados.")
         else:
-            # pandas is used ONLY to shape data for the native chart, so the
-            # x-axis shows Portuguese labels instead of internal state names.
-            distribution_df = pd.DataFrame(
-                {
-                    "Estado": [
-                        CHECKIN_STATE_LABELS_PT.get(item["state"], item["state"])
-                        for item in distribution
-                    ],
-                    "Check-ins": [item["count"] for item in distribution],
-                }
-            )
+            distribution_df = pd.DataFrame({
+                "Estado": [
+                    CHECKIN_STATE_LABELS_PT.get(item["state"], item["state"])
+                    for item in distribution
+                ],
+                "Check-ins": [item["count"] for item in distribution],
+            })
             st.bar_chart(distribution_df, x="Estado", y="Check-ins")
 
     st.divider()
 
-    # ---- Section 4: Recent check-in evolution (line chart) ----
+    # ---- Evolution chart ----
     st.subheader("Evolução recente dos check-ins")
     timeseries_result = get_checkin_timeseries(user_id, limit=10)
     if not timeseries_result["success"]:
@@ -565,35 +785,200 @@ def show_overview(user_id: str, display_name: str | None) -> None:
     else:
         timeseries = timeseries_result["data"]
         numeric_columns = ["energy_level", "anxiety_level", "focus_level"]
-
-        # "Enough data" means at least one non-None numeric value across the
-        # recent check-ins. None is never coerced to zero.
         has_numeric_data = any(
-            row.get(column) is not None
-            for row in timeseries
-            for column in numeric_columns
+            row.get(col) is not None for row in timeseries for col in numeric_columns
         )
-
         if not timeseries or not has_numeric_data:
             st.info("Ainda não há dados suficientes para mostrar a evolução.")
         else:
-            # pandas ONLY prepares chart data here — no analytics is computed.
-            # Missing values become NaN (not 0), which st.line_chart renders
-            # as gaps in the line rather than dropping the point to zero.
+            # pandas ONLY for chart shaping; None becomes NaN (never 0),
+            # which st.line_chart renders as line gaps.
             evolution_df = pd.DataFrame(timeseries)
             evolution_df["created_at"] = pd.to_datetime(evolution_df["created_at"])
-            evolution_df = evolution_df.rename(
-                columns={
-                    "energy_level": "Energia",
-                    "anxiety_level": "Ansiedade",
-                    "focus_level": "Foco",
-                }
-            )
-            st.line_chart(
-                evolution_df,
-                x="created_at",
-                y=["Energia", "Ansiedade", "Foco"],
-            )
+            evolution_df = evolution_df.rename(columns={
+                "energy_level": "Energia",
+                "anxiety_level": "Ansiedade",
+                "focus_level": "Foco",
+            })
+            st.line_chart(evolution_df, x="created_at", y=["Energia", "Ansiedade", "Foco"])
+
+
+# =========================================================
+# Screen: Historical Analysis ("Análise histórica")
+# =========================================================
+def _completion_rate_bar_chart(labels: list[str], rates: list[float], label_column: str) -> None:
+    """Shared helper: draws a completion-rate bar chart."""
+    chart_df = pd.DataFrame({label_column: labels, "Taxa de conclusão (%)": rates})
+    st.bar_chart(chart_df, x=label_column, y="Taxa de conclusão (%)")
+
+
+def show_historical_analysis(user_id: str, display_name: str | None) -> None:
+    _render_page_header(
+        "Análise histórica",
+        "Demonstração do pipeline analítico do Mody.",
+    )
+
+    # Required synthetic-data disclosure — calm info-panel, not st.warning().
+    # Static text, but escaped for consistent discipline.
+    safe_title = html.escape("🧪 Dados de demonstração")
+    safe_body = html.escape(
+        "Esta análise utiliza dados fictícios gerados para demonstrar o "
+        "fluxo analítico do Mody. Os resultados não representam usuários reais."
+    )
+    st.markdown(
+        '<div class="info-panel">'
+        f'<div class="info-panel-title">{safe_title}</div>'
+        f'<p class="info-panel-text">{safe_body}</p>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ---- Summary KPIs ----
+    st.subheader("Resumo (dados sintéticos)")
+    overall = get_synthetic_overall_task_metrics()
+    state_distribution = get_synthetic_checkin_state_distribution()
+    total_checkins = sum(item["count"] for item in state_distribution)
+    _render_metric_row([
+        (overall["total_tasks"], "Tarefas"),
+        (f"{overall['completion_rate']}%", "Conclusão"),
+        (overall["completed_tasks"], "Concluídas"),
+        (total_checkins, "Check-ins"),
+    ])
+
+    st.divider()
+
+    # ---- Energy ----
+    st.subheader("Conclusão por nível de energia")
+    energy_results = get_synthetic_completion_by_energy()
+    _completion_rate_bar_chart(
+        labels=[SYNTHETIC_LEVEL_GROUP_LABELS_PT[r["energy_group"]] for r in energy_results],
+        rates=[r["completion_rate"] for r in energy_results],
+        label_column="Energia",
+    )
+    eg = {r["energy_group"]: r["completion_rate"] for r in energy_results}
+    st.caption(
+        f"Neste conjunto sintético, dias com energia alta apresentaram taxa de conclusão de "
+        f"{eg['High']}%, enquanto dias com energia baixa apresentaram {eg['Low']}%. "
+        "Associação observada nos dados de demonstração, não uma relação de causa e efeito."
+    )
+
+    st.divider()
+
+    # ---- Focus ----
+    st.subheader("Conclusão por nível de foco")
+    focus_results = get_synthetic_completion_by_focus()
+    _completion_rate_bar_chart(
+        labels=[SYNTHETIC_LEVEL_GROUP_LABELS_PT[r["focus_group"]] for r in focus_results],
+        rates=[r["completion_rate"] for r in focus_results],
+        label_column="Foco",
+    )
+    fg = {r["focus_group"]: r["completion_rate"] for r in focus_results}
+    st.caption(
+        f"Nos dados sintéticos, dias com foco alto apresentaram taxa de conclusão de "
+        f"{fg['High']}%, contra {fg['Low']}% em dias com foco baixo. "
+        "Associação observada apenas neste conjunto de demonstração."
+    )
+
+    st.divider()
+
+    # ---- Priority ----
+    st.subheader("Conclusão por prioridade")
+    priority_results = get_synthetic_completion_by_priority()
+    _completion_rate_bar_chart(
+        labels=[PRIORITY_LABELS_PT[r["priority"]] for r in priority_results],
+        rates=[r["completion_rate"] for r in priority_results],
+        label_column="Prioridade",
+    )
+    st.caption(
+        "Neste conjunto de demonstração, tarefas de prioridade alta "
+        "apresentaram a maior taxa de conclusão entre os três níveis."
+    )
+
+    st.divider()
+
+    # ---- Weekday ----
+    st.subheader("Conclusão por dia da semana")
+    weekday_results = get_synthetic_completion_by_weekday()
+    _completion_rate_bar_chart(
+        labels=[SYNTHETIC_WEEKDAY_LABELS_PT[r["weekday"]] for r in weekday_results],
+        rates=[r["completion_rate"] for r in weekday_results],
+        label_column="Dia",
+    )
+    st.caption(
+        "Nos dados sintéticos, a taxa de conclusão variou ao longo dos dias da semana, "
+        "sem representar um padrão real de comportamento."
+    )
+
+    st.divider()
+
+    # ---- Overwhelmed comparison ----
+    st.subheader("Dias com check-in de sobrecarga")
+    overwhelmed_results = get_synthetic_completion_by_overwhelmed_state()
+    _completion_rate_bar_chart(
+        labels=[SYNTHETIC_OVERWHELMED_LABELS_PT[r["group"]] for r in overwhelmed_results],
+        rates=[r["completion_rate"] for r in overwhelmed_results],
+        label_column="Grupo",
+    )
+    owg = {r["group"]: r["completion_rate"] for r in overwhelmed_results}
+    st.caption(
+        f"Nos dados de demonstração, dias com check-in de sobrecarga apresentaram "
+        f"taxa de conclusão de {owg['Days with overwhelmed check-in']}%, contra "
+        f"{owg['Other check-in days']}% nos demais. Associação observada apenas neste "
+        "conjunto sintético, sem relação de causa e efeito implícita."
+    )
+
+    st.divider()
+
+    # ---- Weekday vs weekend ----
+    st.subheader("Dias de semana vs. fim de semana")
+    wvw_results = get_synthetic_weekday_vs_weekend_metrics()
+    summary_table = pd.DataFrame([
+        {
+            "Grupo": SYNTHETIC_WEEKDAY_VS_WEEKEND_LABELS_PT[r["group"]],
+            "Taxa de conclusão (%)": r["completion_rate"],
+            "Energia média": r["avg_energy"] if r["avg_energy"] is not None else "Sem dados",
+            "Foco médio": r["avg_focus"] if r["avg_focus"] is not None else "Sem dados",
+            "Ansiedade média": r["avg_anxiety"] if r["avg_anxiety"] is not None else "Sem dados",
+        }
+        for r in wvw_results
+    ])
+    st.table(summary_table)
+    _completion_rate_bar_chart(
+        labels=[SYNTHETIC_WEEKDAY_VS_WEEKEND_LABELS_PT[r["group"]] for r in wvw_results],
+        rates=[r["completion_rate"] for r in wvw_results],
+        label_column="Grupo",
+    )
+    st.caption(
+        "Neste conjunto sintético, o fim de semana apresentou taxa de conclusão "
+        "diferente da observada nos dias de semana. Padrão descritivo do conjunto "
+        "de demonstração, não uma conclusão sobre hábitos reais."
+    )
+
+    st.divider()
+
+    # ---- 90-day evolution ----
+    st.subheader("Evolução dos check-ins (90 dias, dados sintéticos)")
+    synthetic_timeseries = get_synthetic_checkin_timeseries()
+    has_numeric_data = any(
+        row.get(col) is not None
+        for row in synthetic_timeseries
+        for col in ("avg_energy", "avg_anxiety", "avg_focus")
+    )
+    if not synthetic_timeseries or not has_numeric_data:
+        st.info("Ainda não há dados suficientes para mostrar a evolução.")
+    else:
+        synthetic_df = pd.DataFrame(synthetic_timeseries)
+        synthetic_df["date"] = pd.to_datetime(synthetic_df["date"])
+        synthetic_df = synthetic_df.rename(columns={
+            "avg_energy": "Energia", "avg_anxiety": "Ansiedade", "avg_focus": "Foco",
+        })
+        st.line_chart(synthetic_df, x="date", y=["Energia", "Ansiedade", "Foco"])
+    st.caption(
+        "Linha do tempo com base no conjunto sintético de 90 dias. "
+        "Valores ausentes são exibidos como lacunas no gráfico, nunca como zero."
+    )
 
 
 # =========================================================
@@ -611,11 +996,35 @@ else:
         profile = get_existing_data(current_user_id)["profile"] or {}
         display_name = profile.get("display_name")
 
-        # Streamlit-native navigation between the two authenticated screens.
-        # Login and onboarding intentionally have no sidebar nav.
-        page = st.sidebar.radio("Navegação", ("Hoje", "Visão geral"))
+        # Sidebar brand block — icon image + text, no routing logic.
+        # st.sidebar.image renders the icon natively; the text identity
+        # (name + subtitle) follows as a styled markdown block.
+        st.sidebar.image("assets/mody_icon.png", width=90)
+        st.sidebar.markdown(
+            '<div class="sidebar-brand">'
+            '<div class="sidebar-brand-name">Mody</div>'
+            '<div class="sidebar-brand-subtitle">Adaptive Planner</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        page = st.sidebar.radio(
+            "Navegação",
+            ("Hoje", "Calendário", "Visão geral", "Análise histórica"),
+            label_visibility="collapsed",
+        )
+
+        st.sidebar.divider()
+        if st.sidebar.button("Sair", use_container_width=True):
+            sign_out()
+            st.session_state.clear()
+            st.rerun()
 
         if page == "Hoje":
             show_home(current_user_id, display_name)
-        else:
+        elif page == "Calendário":
+            show_calendar(current_user_id, display_name)
+        elif page == "Visão geral":
             show_overview(current_user_id, display_name)
+        else:
+            show_historical_analysis(current_user_id, display_name)

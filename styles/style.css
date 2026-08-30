@@ -1,54 +1,739 @@
-/* Estilo geral: espaçamento confortável e visual calmo */
+/* =========================================================
+   Mody — Design System
+   =========================================================
+   Goal: calm, warm, minimal productivity-app aesthetic.
+   "One thing at a time."
 
-.block-container {
-    padding-top: 3rem;
-    padding-bottom: 3rem;
-    max-width: 640px;
+   Selector strategy: Streamlit's stable data-testid attributes,
+   ARIA roles, and semantic class names. Hashed/generated class
+   names are avoided; they change across Streamlit versions.
+
+   Layout: layout="wide" in app.py. The main block-container is
+   constrained to ~1050px and centered here in CSS so content
+   breathes on large screens without stretching edge to edge.
+   ========================================================= */
+
+/* =========================================================
+   Design tokens
+   ========================================================= */
+:root {
+  --mody-bg:             #F7F8F3;
+  --mody-surface:        #FFFFFF;
+  --mody-border:         #E4E9E3;
+  --mody-border-strong:  #CBD8CC;
+
+  --mody-text-primary:   #27332C;
+  --mody-text-secondary: #5A6E62;
+  --mody-text-muted:     #8A9A8E;
+
+  --mody-accent:         #557A64;
+  --mody-accent-strong:  #3F6250;
+  --mody-accent-soft:    #EAF2EC;
+  --mody-accent-soft-bd: #C6DCCA;
+
+  --mody-radius-sm:      8px;
+  --mody-radius-md:      12px;
+  --mody-shadow:         0 1px 2px rgba(39,51,44,.04),
+                         0 1px 4px rgba(39,51,44,.07);
 }
 
-/* Título principal */
-h1 {
-    font-weight: 600;
-    color: #2f3e46;
+
+/* =========================================================
+   Global
+   ========================================================= */
+[data-testid="stAppViewContainer"] {
+  background: var(--mody-bg);
 }
 
-/* Cartão que envolve blocos de informação (tarefa, compromisso) */
-.card {
-    background-color: #f4f6f5;
-    border-radius: 16px;
-    padding: 1.2rem 1.4rem;
-    margin-bottom: 1rem;
-    border: 1px solid #e2e8e6;
+[data-testid="stMain"] .block-container {
+  max-width: 1050px;
+  margin: 0 auto;
+  padding: 2.25rem 2.5rem 4rem 2.5rem;
 }
 
-.card-label {
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #6b7d76;
-    margin-bottom: 0.2rem;
+[data-testid="stAppViewContainer"] p,
+[data-testid="stAppViewContainer"] label,
+[data-testid="stAppViewContainer"] li {
+  color: var(--mody-text-primary);
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
-.card-value {
-    font-size: 1.15rem;
-    color: #2f3e46;
-    font-weight: 500;
+[data-testid="stAppViewContainer"]
+  [data-testid="stCaptionContainer"],
+[data-testid="stAppViewContainer"]
+  [data-testid="stCaptionContainer"] * {
+  color: var(--mody-text-secondary) !important;
+  font-size: 0.83rem !important;
+  line-height: 1.55 !important;
 }
 
-/* Botões do Streamlit: cantos arredondados, sem agressividade visual */
-div.stButton > button {
-    border-radius: 12px;
-    padding: 0.6rem 1rem;
-    border: 1px solid #d7ded9;
-    font-weight: 500;
+[data-testid="stAppViewContainer"] hr {
+  border: none;
+  border-top: 1px solid var(--mody-border);
+  margin: 1.75rem 0;
 }
 
-/* Mensagem de resposta calma, sem cores de alarme */
+[data-testid="stAppViewContainer"] h3 {
+  font-size: 1.02rem;
+  font-weight: 640;
+  color: var(--mody-text-primary);
+  margin: 0 0 0.65rem 0;
+  letter-spacing: -0.005em;
+}
+
+
+/* =========================================================
+   Page header
+   ========================================================= */
+.page-header {
+  margin-bottom: 1.75rem;
+}
+
+.page-title {
+  display: block;
+  visibility: visible;
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--mody-text-primary);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin: 0 0 0.2rem 0;
+}
+
+.page-greeting {
+  font-size: 1.05rem;
+  font-weight: 540;
+  color: var(--mody-text-primary);
+  margin: 0.05rem 0 0.1rem 0;
+}
+
+.page-description {
+  font-size: 0.97rem;
+  color: var(--mody-text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   Section question
+   ========================================================= */
+.section-question {
+  font-size: 1rem;
+  font-weight: 560;
+  color: var(--mody-text-primary);
+  margin: 0.25rem 0 0.7rem 0;
+}
+
+
+/* =========================================================
+   Gap between check-in and adaptive suggestion
+   ========================================================= */
+.checkin-to-suggestion-gap {
+  height: 1rem;
+}
+
+
+/* =========================================================
+   Check-in response
+   ========================================================= */
 .resposta-suave {
-    background-color: #eef2ee;
-    border-radius: 12px;
-    padding: 0.8rem 1rem;
-    margin-top: 0.8rem;
-    color: #3a4a44;
-    font-size: 0.95rem;
+  background: var(--mody-accent-soft);
+  border: 1px solid var(--mody-accent-soft-bd);
+  border-radius: var(--mody-radius-sm);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9rem;
+  color: var(--mody-accent-strong);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   Adaptive suggestion
+   ========================================================= */
+.para-agora {
+  background: var(--mody-accent-soft);
+  border: 1px solid var(--mody-accent-soft-bd);
+  border-left: 4px solid var(--mody-accent);
+  border-radius: var(--mody-radius-md);
+  padding: 1.4rem 1.5rem;
+  margin: 0.25rem 0 0.5rem 0;
+}
+
+.para-agora-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mody-accent-strong);
+  margin-bottom: 0.5rem;
+}
+
+.para-agora-title {
+  font-size: 1.25rem;
+  font-weight: 660;
+  color: var(--mody-text-primary);
+  line-height: 1.3;
+  margin-bottom: 0.5rem;
+}
+
+.para-agora-message {
+  font-size: 0.93rem;
+  color: var(--mody-text-secondary);
+  line-height: 1.55;
+  margin-bottom: 0.3rem;
+}
+
+.para-agora-action {
+  font-size: 0.88rem;
+  color: var(--mody-accent-strong);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+
+/* =========================================================
+   Seu dia
+   ========================================================= */
+.seu-dia-heading {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mody-text-muted);
+  margin: 0.5rem 0 0.75rem 0;
+}
+
+
+/* =========================================================
+   Day columns
+   ========================================================= */
+.day-col-card {
+  background: var(--mody-surface);
+  border: 1px solid var(--mody-border);
+  border-radius: var(--mody-radius-md);
+  box-shadow: var(--mody-shadow);
+  padding: 1.15rem 1.25rem;
+  min-height: 110px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.day-col-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mody-text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.day-col-value {
+  font-size: 1.08rem;
+  font-weight: 620;
+  color: var(--mody-text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.day-col-desc {
+  font-size: 0.85rem;
+  color: var(--mody-text-secondary);
+  margin-top: 0.2rem;
+  line-height: 1.45;
+}
+
+.day-col-meta {
+  font-size: 0.82rem;
+  color: var(--mody-text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+
+.day-col-empty {
+  font-size: 0.92rem;
+  color: var(--mody-text-muted);
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   Agenda timeline
+   ========================================================= */
+.agenda-timeline {
+  padding: 0.6rem 0;
+}
+
+.agenda-date-anchor {
+  font-size: 0.72rem;
+  font-weight: 720;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--mody-accent-strong);
+  margin-bottom: 0.3rem;
+}
+
+.agenda-time-title-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.agenda-time {
+  font-size: 0.88rem;
+  font-weight: 560;
+  color: var(--mody-text-secondary);
+  white-space: nowrap;
+  min-width: 3.2rem;
+}
+
+.agenda-entry-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--mody-text-primary);
+  word-break: break-word;
+}
+
+.agenda-entry-note {
+  font-size: 0.84rem;
+  color: var(--mody-text-secondary);
+  margin-top: 0.2rem;
+  padding-left: 3.95rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.agenda-divider {
+  border: none;
+  border-top: 1px solid var(--mody-border);
+  margin: 0.4rem 0;
+}
+
+.agenda-empty {
+  font-size: 0.95rem;
+  color: var(--mody-text-muted);
+  padding: 0.75rem 0;
+}
+
+
+/* =========================================================
+   Metric row
+   ========================================================= */
+.metric-row {
+  display: flex;
+  gap: 0;
+  border-top: 1px solid var(--mody-border);
+  border-bottom: 1px solid var(--mody-border);
+  padding: 1rem 0;
+  margin-bottom: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.metric-item {
+  flex: 1 1 22%;
+  min-width: 120px;
+  padding: 0.25rem 0.75rem;
+  border-right: 1px solid var(--mody-border);
+}
+
+.metric-item:last-child {
+  border-right: none;
+}
+
+.metric-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--mody-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.metric-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mody-text-muted);
+  margin-top: 0.25rem;
+}
+
+
+/* =========================================================
+   Info panel
+   ========================================================= */
+.info-panel {
+  background: var(--mody-surface);
+  border: 1px solid var(--mody-border-strong);
+  border-left: 4px solid var(--mody-accent);
+  border-radius: var(--mody-radius-sm);
+  padding: 0.85rem 1.1rem;
+  margin-bottom: 1.25rem;
+}
+
+.info-panel-title {
+  font-size: 0.9rem;
+  font-weight: 680;
+  color: var(--mody-text-primary);
+  margin-bottom: 0.2rem;
+}
+
+.info-panel-text {
+  font-size: 0.84rem;
+  color: var(--mody-text-secondary);
+  margin: 0;
+  line-height: 1.55;
+}
+
+
+/* =========================================================
+   Buttons
+   ========================================================= */
+[data-testid="stAppViewContainer"] .stButton > button {
+  border-radius: var(--mody-radius-sm);
+  font-size: 0.88rem;
+  font-weight: 500;
+  border: 1px solid var(--mody-border-strong);
+  background: var(--mody-surface);
+  color: var(--mody-text-primary);
+  padding: 0.42rem 1rem;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  white-space: normal;
+  word-break: break-word;
+}
+
+[data-testid="stAppViewContainer"] .stButton > button:hover {
+  border-color: var(--mody-accent);
+  color: var(--mody-accent-strong);
+  background: var(--mody-accent-soft);
+}
+
+[data-testid="stAppViewContainer"] .stButton > button[kind="primary"] {
+  background: var(--mody-accent);
+  border-color: var(--mody-accent);
+  color: #fff;
+  font-weight: 580;
+}
+
+[data-testid="stAppViewContainer"] .stButton > button[kind="primary"]:hover {
+  background: var(--mody-accent-strong);
+  border-color: var(--mody-accent-strong);
+  color: #fff;
+}
+
+
+/* =========================================================
+   Forms
+   ========================================================= */
+[data-testid="stForm"] {
+  background: var(--mody-surface);
+  border: 1px solid var(--mody-border);
+  border-radius: var(--mody-radius-md);
+  box-shadow: var(--mody-shadow);
+  padding: 1.15rem 1.3rem 1.3rem;
+  margin-bottom: 0.75rem;
+}
+
+[data-testid="stAppViewContainer"] .stTextInput input,
+[data-testid="stAppViewContainer"] .stTextArea textarea,
+[data-testid="stAppViewContainer"] .stDateInput input,
+[data-testid="stAppViewContainer"] .stTimeInput input {
+  border-radius: var(--mody-radius-sm);
+  border: 1px solid var(--mody-border-strong);
+  background: var(--mody-bg);
+  font-size: 0.93rem;
+}
+
+[data-testid="stAppViewContainer"] .stTextInput input:focus,
+[data-testid="stAppViewContainer"] .stTextArea textarea:focus,
+[data-testid="stAppViewContainer"] .stDateInput input:focus,
+[data-testid="stAppViewContainer"] .stTimeInput input:focus {
+  border-color: var(--mody-accent);
+  box-shadow: 0 0 0 1px var(--mody-accent);
+  outline: none;
+}
+
+
+/* =========================================================
+   Expander
+   ========================================================= */
+[data-testid="stExpander"] > div:first-child {
+  border-radius: var(--mody-radius-sm);
+  border: 1px solid var(--mody-border);
+  background: var(--mody-surface);
+  font-size: 0.93rem;
+  font-weight: 540;
+  color: var(--mody-text-primary);
+}
+
+[data-testid="stExpander"] > div:first-child:hover {
+  border-color: var(--mody-accent);
+}
+
+
+/* =========================================================
+   Tabs
+   ========================================================= */
+[data-testid="stTabs"] [data-baseweb="tab"] {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--mody-text-secondary);
+}
+
+[data-testid="stTabs"] [aria-selected="true"] {
+  color: var(--mody-accent-strong);
+  font-weight: 640;
+}
+
+
+/* =========================================================
+   Login
+   ========================================================= */
+.login-container {
+  max-width: 460px;
+  margin: 0 auto;
+  padding-top: 2.5rem;
+}
+
+.login-tagline {
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--mody-text-secondary);
+  margin: 0.85rem 0 1.75rem 0;
+  line-height: 1.5;
+}
+
+
+/* =========================================================
+   Alerts
+   ========================================================= */
+[data-testid="stAppViewContainer"] [data-testid="stAlert"] {
+  border-radius: var(--mody-radius-sm);
+  font-size: 0.88rem;
+}
+
+
+/* =========================================================
+   Sidebar
+   ========================================================= */
+[data-testid="stSidebar"] {
+  background: var(--mody-surface);
+  border-right: 1px solid var(--mody-border);
+}
+
+[data-testid="stSidebar"] > div:first-child {
+  padding-top: 1.5rem;
+}
+
+
+/* =========================================================
+   Sidebar logo — UPDATED
+   ========================================================= */
+
+[data-testid="stSidebar"] [data-testid="stImage"] {
+  margin-bottom: 0.35rem;
+  margin-left: 0.25rem;
+}
+
+[data-testid="stSidebar"] [data-testid="stImage"] img {
+  width: 90px !important;
+  max-width: 90px !important;
+  height: auto !important;
+  object-fit: contain;
+}
+
+/* Force the logo to a more visible size */
+[data-testid="stSidebar"] [data-testid="stImage"] img {
+  width: 90px !important;
+  max-width: 90px !important;
+  height: auto !important;
+  object-fit: contain;
+}
+
+
+.sidebar-brand {
+  padding: 0.1rem 0.5rem 1rem 0.5rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--mody-border);
+}
+
+.sidebar-brand-name {
+  font-size: 1.08rem;
+  font-weight: 730;
+  color: var(--mody-accent-strong);
+  letter-spacing: -0.01em;
+}
+
+.sidebar-brand-subtitle {
+  font-size: 0.74rem;
+  color: var(--mody-text-muted);
+  margin-top: 0.1rem;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] {
+  gap: 0.1rem;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label {
+  padding: 0.42rem 0.65rem;
+  border-radius: var(--mody-radius-sm);
+  font-size: 0.91rem;
+  color: var(--mody-text-secondary);
+  transition: background 0.12s;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+  background: var(--mody-bg);
+  color: var(--mody-text-primary);
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+  background: var(--mody-accent-soft);
+  color: var(--mody-accent-strong);
+  font-weight: 640;
+}
+
+
+/* =========================================================
+   Charts
+   ========================================================= */
+[data-testid="stArrowVegaLiteChart"],
+[data-testid="stVegaLiteChart"] {
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+
+/* =========================================================
+   Responsive breakpoints
+   ========================================================= */
+
+/* Tablet */
+@media (max-width: 900px) {
+  [data-testid="stMain"] .block-container {
+    padding: 1.5rem 1.5rem 3rem 1.5rem;
+  }
+
+  .page-title {
+    font-size: 1.45rem;
+  }
+
+  .para-agora {
+    padding: 1.1rem 1.2rem;
+  }
+
+  .para-agora-title {
+    font-size: 1.12rem;
+  }
+}
+
+
+/* Narrow tablet / large phone */
+@media (max-width: 768px) {
+  [data-testid="stMain"] .block-container {
+    padding: 1.25rem 1rem 2.5rem 1rem;
+  }
+
+  .metric-item {
+    flex: 1 1 40%;
+    min-width: 100px;
+  }
+
+  .agenda-entry-note {
+    padding-left: 0;
+    margin-top: 0.25rem;
+  }
+
+  .login-container {
+    max-width: 100%;
+    padding-top: 1.25rem;
+  }
+
+  .para-agora {
+    padding: 1rem 1rem;
+  }
+}
+
+
+/* Mobile */
+@media (max-width: 480px) {
+  [data-testid="stMain"] .block-container {
+    padding: 1rem 0.75rem 2rem 0.75rem;
+  }
+
+  .page-title {
+    font-size: 1.3rem;
+  }
+
+  .page-greeting {
+    font-size: 0.97rem;
+  }
+
+  .metric-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .metric-item {
+    flex: none;
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--mody-border);
+    padding: 0.55rem 0;
+  }
+
+  .metric-item:last-child {
+    border-bottom: none;
+  }
+
+  .metric-value {
+    font-size: 1.3rem;
+  }
+
+  .day-col-card {
+    min-height: auto;
+    padding: 0.9rem 1rem;
+  }
+
+  .day-col-value {
+    font-size: 1rem;
+  }
+
+  .agenda-time-title-row {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .agenda-entry-note {
+    padding-left: 0;
+  }
+
+  .para-agora {
+    padding: 0.9rem 0.9rem;
+    border-left-width: 3px;
+  }
+
+  .para-agora-title {
+    font-size: 1.08rem;
+  }
+
+  [data-testid="stAppViewContainer"] .stButton > button {
+    font-size: 0.84rem;
+    padding: 0.5rem 0.5rem;
+  }
+
+  .login-container {
+    max-width: 100%;
+    padding-top: 1.25rem;
+  }
+
+  .page-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .checkin-to-suggestion-gap {
+    height: 0.35rem;
+  }
 }
