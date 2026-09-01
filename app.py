@@ -4,7 +4,15 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from services.auth_service import restore_session, sign_in, sign_out, sign_up
+from services.auth_service import (
+    restore_session,
+    sign_in,
+    sign_out,
+    sign_up,
+    request_password_reset,
+    update_password,
+    exchange_recovery_code,
+)
 from services.language_service import (
     LANGUAGE_LABELS,
     SUPPORTED_LANGUAGES,
@@ -237,9 +245,147 @@ def _compact_task_meta(task: dict) -> str:
 
 
 # =========================================================
+# Password recovery callback
+# =========================================================
+def handle_password_recovery_callback() -> None:
+    """
+    Detecta o ?code=... devolvido pelo Supabase no fluxo PKCE,
+    troca o código por uma sessão autenticada e coloca o app
+    no modo de definição de nova senha.
+    """
+    code = st.query_params.get("code")
+
+    if not code:
+        return
+
+    # Evita tentar consumir o mesmo auth code mais de uma vez.
+    if st.session_state.get("recovery_code_processed"):
+        return
+
+    st.session_state["recovery_code_processed"] = True
+
+    result = exchange_recovery_code(str(code))
+
+    if result["success"]:
+        start_session(result["session"])
+        st.session_state["password_recovery_mode"] = True
+        st.session_state["show_password_reset"] = False
+        st.session_state.pop("password_recovery_error", None)
+
+        # O auth code é de uso único; retiramos da URL depois da troca.
+        st.query_params.clear()
+        st.rerun()
+    else:
+        st.session_state["password_recovery_error"] = result["error"]
+        st.query_params.clear()
+        st.rerun()
+
+
+# =========================================================
+# Screen: Set new password
+# =========================================================
+def show_update_password() -> None:
+    """Tela exibida depois que o link de recuperação é validado."""
+    _render_language_selector(key="language_update_password")
+
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+
+    _render_page_header(
+        t("Criar nova senha"),
+        t("Escolha uma nova senha para acessar sua conta."),
+    )
+
+    with st.form("update_password_form"):
+        new_password = st.text_input(
+            t("Nova senha"),
+            type="password",
+            key="new_password",
+        )
+        confirm_password = st.text_input(
+            t("Confirmar nova senha"),
+            type="password",
+            key="confirm_new_password",
+        )
+
+        submitted = st.form_submit_button(
+            t("Salvar nova senha"),
+            use_container_width=True,
+        )
+
+    if submitted:
+        if not new_password or not confirm_password:
+            st.warning(t("Preencha os dois campos de senha."))
+        elif new_password != confirm_password:
+            st.warning(t("As senhas não coincidem."))
+        else:
+            result = update_password(new_password)
+
+            if result["success"]:
+                language = get_language()
+                sign_out()
+
+                st.session_state.clear()
+                set_language(language)
+                st.session_state["password_reset_completed"] = True
+
+                st.query_params.clear()
+                st.rerun()
+            else:
+                st.error(translate_generated_text(result["error"]))
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# Screen: Password reset request
+# =========================================================
+def show_password_reset_request() -> None:
+    """Ask for the user's email and send a Supabase password-reset link."""
+    _render_language_selector(key="language_password_reset")
+
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+
+    _render_page_header(
+        t("Recuperar senha"),
+        t("Informe seu e-mail para receber as instruções de recuperação."),
+    )
+
+    with st.form("password_reset_request_form"):
+        email = st.text_input(t("E-mail"), key="reset_email")
+
+        submitted = st.form_submit_button(
+            t("Enviar link de recuperação"),
+            use_container_width=True,
+        )
+
+    if submitted:
+        if not email:
+            st.warning(t("Informe seu e-mail."))
+        else:
+            result = request_password_reset(
+                email=email,
+                redirect_url="http://localhost:8501/",
+            )
+
+            if result["success"]:
+                st.success(translate_generated_text(result["message"]))
+            else:
+                st.error(translate_generated_text(result["error"]))
+
+    if st.button(t("← Voltar para entrar"), use_container_width=True):
+        st.session_state["show_password_reset"] = False
+        st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================================================
 # Screen: Login / Sign up
 # =========================================================
 def show_login() -> None:
+    if st.session_state.pop("password_reset_completed", False):
+        st.success(t("Senha atualizada com sucesso. Entre com sua nova senha."))
+
     # Center the auth area at ~460px so it does not stretch
     # across the full 1050px content column on wide layout.
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
@@ -265,6 +411,7 @@ def show_login() -> None:
             email = st.text_input(t("E-mail"), key="login_email")
             password = st.text_input(t("Senha"), type="password", key="login_password")
             submitted = st.form_submit_button(t("Entrar"), use_container_width=True)
+
         if submitted:
             if not email or not password:
                 st.warning(t("Preencha e-mail e senha."))
@@ -275,6 +422,10 @@ def show_login() -> None:
                 else:
                     start_session(result["session"])
                     st.rerun()
+
+        if st.button(t("Esqueci minha senha"), use_container_width=True):
+            st.session_state["show_password_reset"] = True
+            st.rerun()
 
     with signup_tab:
         with st.form("signup_form"):
@@ -1028,7 +1179,20 @@ def show_historical_analysis(user_id: str, display_name: str | None) -> None:
 # =========================================================
 # Routing
 # =========================================================
-if not is_authenticated():
+handle_password_recovery_callback()
+
+if st.session_state.get("password_recovery_error"):
+    st.error(translate_generated_text(st.session_state["password_recovery_error"]))
+    if st.button(t("Solicitar novo link"), use_container_width=True):
+        st.session_state.pop("password_recovery_error", None)
+        st.session_state.pop("recovery_code_processed", None)
+        st.session_state["show_password_reset"] = True
+        st.rerun()
+elif st.session_state.get("password_recovery_mode", False):
+    show_update_password()
+elif st.session_state.get("show_password_reset", False):
+    show_password_reset_request()
+elif not is_authenticated():
     show_login()
 else:
     auth = st.session_state.auth

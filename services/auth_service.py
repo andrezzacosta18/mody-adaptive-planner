@@ -64,7 +64,84 @@ def sign_in(email: str, password: str) -> dict:
 
     return {"success": True, "session": response.session, "user": response.user}
 
+def request_password_reset(email: str, redirect_url: str) -> dict:
+    """
+    Envia um e-mail de recuperação de senha usando o Supabase Auth.
 
+    A mensagem retornada é neutra para evitar informar se o e-mail
+    existe ou não no sistema.
+    """
+    client = get_client()
+
+    try:
+        client.auth.reset_password_for_email(
+            email,
+            {"redirect_to": redirect_url},
+        )
+
+        return {
+            "success": True,
+            "message": (
+                "Se existir uma conta associada a este e-mail, "
+                "você receberá instruções para redefinir sua senha."
+            ),
+        }
+
+    except AuthApiError:
+        # Mantemos uma mensagem neutra para não revelar se a conta existe.
+        return {
+            "success": True,
+            "message": (
+                "Se existir uma conta associada a este e-mail, "
+                "você receberá instruções para redefinir sua senha."
+            ),
+        }
+
+    except Exception:
+        return {
+            "success": False,
+            "error": (
+                "Não foi possível solicitar a recuperação agora. "
+                "Tente novamente em instantes."
+            ),
+        }
+def update_password(new_password: str) -> dict:
+    """
+    Atualiza a senha do usuário autenticado em uma sessão de recuperação.
+    """
+    client = get_client()
+
+    try:
+        response = client.auth.update_user(
+            {"password": new_password}
+        )
+
+        if response.user is None:
+            return {
+                "success": False,
+                "error": "Não foi possível atualizar a senha.",
+            }
+
+        return {
+            "success": True,
+            "message": "Senha atualizada com sucesso.",
+        }
+
+    except AuthApiError as e:
+        return {
+            "success": False,
+            "error": _mensagem_amigavel(e),
+        }
+
+    except Exception:
+        return {
+            "success": False,
+            "error": (
+                "Não foi possível atualizar a senha agora. "
+                "Tente novamente em instantes."
+            ),
+        }
+    
 def sign_out() -> None:
     """Encerra a sessão no Supabase. Falhas aqui não impedem o logout
     local (o app limpa o session_state de qualquer forma, em app.py)."""
@@ -106,7 +183,44 @@ def restore_session(access_token: str, refresh_token: str) -> bool:
         return True
     except Exception:
         return False
+def exchange_recovery_code(code: str) -> dict:
+    """
+    Troca o código recebido no link de recuperação por uma sessão
+    autenticada válida do Supabase.
+    """
+    client = get_client()
 
+    try:
+        response = client.auth.exchange_code_for_session(
+            {"auth_code": code}
+        )
+
+        if response.session is None or response.user is None:
+            return {
+                "success": False,
+                "error": "O link de recuperação não é válido ou expirou.",
+            }
+
+        return {
+            "success": True,
+            "session": response.session,
+            "user": response.user,
+        }
+
+    except AuthApiError:
+        return {
+            "success": False,
+            "error": "O link de recuperação não é válido ou expirou.",
+        }
+
+    except Exception:
+        return {
+            "success": False,
+            "error": (
+                "Não foi possível validar o link de recuperação. "
+                "Solicite um novo link e tente novamente."
+            ),
+        }
 
 def _mensagem_amigavel(erro: AuthApiError) -> str:
     """Traduz erros comuns do Supabase Auth em mensagens claras,
