@@ -46,41 +46,25 @@ create trigger set_updated_at
 
 -- =========================================================
 -- personalization_preferences
--- Preferências opcionais de personalização (onboarding).
--- Dados sensíveis (saúde mental) — minimização de dados:
--- só os dois campos abaixo. NUNCA usados para diagnóstico
--- ou decisão clínica, apenas para adaptar a interface.
+-- Preferências opcionais de personalização do onboarding.
+-- O Mody registra apenas necessidades práticas escolhidas
+-- pelo usuário para adaptar a experiência no aplicativo.
 -- =========================================================
 create table if not exists public.personalization_preferences (
     user_id uuid primary key references auth.users (id) on delete cascade,
 
-    -- NULL = ainda não respondeu. 'prefer_not_to_say' = respondeu
-    -- e escolheu não informar. São sinais diferentes.
-    support_profile text
-        check (
-            support_profile is null
-            or support_profile in (
-                'adhd',
-                'anxiety',
-                'adhd_anxiety',
-                'none',
-                'prefer_not_to_say'
-            )
-        ),
-
-    -- Seleção múltipla opcional, validada contra a lista fechada.
+    -- Seleção múltipla opcional.
     support_needs text[]
         check (
             support_needs is null
             or support_needs <@ array[
+                'organize_tasks',
                 'start_tasks',
-                'organize_day',
-                'remember_commitments',
+                'maintain_focus',
                 'avoid_overload',
-                'reduce_distractions',
-                'manage_anxiety',
-                'build_routines',
-                'estimate_time'
+                'plan_routine',
+                'remember_commitments',
+                'break_down_tasks'
             ]::text[]
         ),
 
@@ -129,18 +113,16 @@ create trigger set_updated_at
 
 -- =========================================================
 -- checkins
--- Registro do estado do usuário. Sem updated_at: é um
--- evento pontual, não algo pensado para ser editado depois.
+-- Registro simples do estado escolhido pelo usuário.
+-- Sem updated_at: é um evento pontual, não algo pensado
+-- para ser editado depois.
 -- =========================================================
 create table if not exists public.checkins (
-    id             uuid primary key default gen_random_uuid(),
-    user_id        uuid not null references auth.users (id) on delete cascade,
-    state          text not null
-                     check (state in ('well', 'overwhelmed', 'calm_needed')),
-    energy_level   smallint check (energy_level between 1 and 5),
-    anxiety_level  smallint check (anxiety_level between 1 and 5),
-    focus_level    smallint check (focus_level between 1 and 5),
-    created_at     timestamptz not null default now()
+    id         uuid primary key default gen_random_uuid(),
+    user_id    uuid not null references auth.users (id) on delete cascade,
+    state      text not null
+               check (state in ('well', 'overwhelmed', 'calm_needed')),
+    created_at timestamptz not null default now()
 );
 
 -- Índice composto: consulta típica é "check-ins do usuário, mais

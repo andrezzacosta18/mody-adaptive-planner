@@ -133,23 +133,15 @@ def save_profile(
 
 def save_preferences(
     user_id: str,
-    support_profile: str | None,
     support_needs: list[str] | None,
 ) -> dict:
     """
     Create or update the user's personalization preferences.
 
-    `support_profile` may contain:
+    The current onboarding stores only practical support needs.
 
-    - adhd
-    - anxiety
-    - adhd_anxiety
-    - none
-    - prefer_not_to_say
-    - None
-
-    `support_needs` may contain a list of valid support categories
-    or None when the user does not select any option.
+    `support_needs` may contain a list of support categories
+    selected by the user, or None when no option is selected.
 
     Uses an upsert on `user_id` to prevent duplicate records.
     """
@@ -157,7 +149,6 @@ def save_preferences(
 
     payload = {
         "user_id": user_id,
-        "support_profile": support_profile,
         "support_needs": support_needs if support_needs else None,
     }
 

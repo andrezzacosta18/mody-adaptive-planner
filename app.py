@@ -5,13 +5,14 @@ import pandas as pd
 import streamlit as st
 
 from services.auth_service import (
+    delete_account,
     restore_session,
     sign_in,
     sign_out,
     sign_up,
     request_password_reset,
     update_password,
-    exchange_recovery_code,
+    verify_recovery_otp,
 )
 from services.language_service import (
     LANGUAGE_LABELS,
@@ -27,6 +28,8 @@ from services.onboarding_service import (
     save_preferences,
     save_profile,
 )
+
+from legal.privacy_policy import show_privacy_policy
 from services.checkin_service import create_checkin, get_checkins
 from services.task_service import complete_task, get_tasks
 from services.appointment_service import (
@@ -76,24 +79,14 @@ load_css("styles/style.css")
 # =========================================================
 # Lookup tables
 # =========================================================
-SUPPORT_PROFILE_OPTIONS = {
-    t("TDAH"): "adhd",
-    t("Ansiedade"): "anxiety",
-    t("TDAH e ansiedade"): "adhd_anxiety",
-    t("Nenhum desses"): "none",
-    t("Prefiro não informar"): "prefer_not_to_say",
-}
-SUPPORT_PROFILE_REVERSE = {v: k for k, v in SUPPORT_PROFILE_OPTIONS.items()}
-
 SUPPORT_NEEDS_OPTIONS = {
-    t("Começar tarefas"): "start_tasks",
-    t("Organizar meu dia"): "organize_day",
-    t("Lembrar compromissos"): "remember_commitments",
+    t("Organizar minhas tarefas"): "organize_tasks",
+    t("Começar tarefas com mais facilidade"): "start_tasks",
+    t("Manter o foco"): "maintain_focus",
     t("Evitar sobrecarga"): "avoid_overload",
-    t("Reduzir distrações"): "reduce_distractions",
-    t("Gerenciar ansiedade"): "manage_anxiety",
-    t("Criar rotinas"): "build_routines",
-    t("Estimar melhor o tempo"): "estimate_time",
+    t("Planejar minha rotina"): "plan_routine",
+    t("Lembrar compromissos"): "remember_commitments",
+    t("Dividir tarefas grandes em passos menores"): "break_down_tasks",
 }
 SUPPORT_NEEDS_REVERSE = {v: k for k, v in SUPPORT_NEEDS_OPTIONS.items()}
 
@@ -245,40 +238,107 @@ def _compact_task_meta(task: dict) -> str:
 
 
 # =========================================================
-# Password recovery callback
+# Screen: Verify password recovery code
 # =========================================================
-def handle_password_recovery_callback() -> None:
+def show_password_recovery_code() -> None:
     """
-    Detecta o ?code=... devolvido pelo Supabase no fluxo PKCE,
-    troca o código por uma sessão autenticada e coloca o app
-    no modo de definição de nova senha.
+    Tela para inserir o código OTP recebido por e-mail.
+    Depois da validação, cria a sessão temporária e abre
+    a tela de criação de nova senha.
     """
-    code = st.query_params.get("code")
+    _render_language_selector(key="language_password_recovery_code")
 
-    if not code:
-        return
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
 
-    # Evita tentar consumir o mesmo auth code mais de uma vez.
-    if st.session_state.get("recovery_code_processed"):
-        return
+    _render_page_header(
+        t("Verificar código"),
+        t("Digite o código de recuperação enviado para o seu e-mail."),
+    )
 
-    st.session_state["recovery_code_processed"] = True
+    recovery_email = st.session_state.get("password_recovery_email", "")
 
-    result = exchange_recovery_code(str(code))
+    with st.form("password_recovery_code_form"):
+        email = st.text_input(
+            t("E-mail"),
+            value=recovery_email,
+            key="recovery_code_email",
+        )
 
-    if result["success"]:
-        start_session(result["session"])
-        st.session_state["password_recovery_mode"] = True
-        st.session_state["show_password_reset"] = False
-        st.session_state.pop("password_recovery_error", None)
+        token = st.text_input(
+            t("Código de recuperação"),
+            key="recovery_otp",
+        )
 
-        # O auth code é de uso único; retiramos da URL depois da troca.
-        st.query_params.clear()
+        submitted = st.form_submit_button(
+            t("Continuar"),
+            use_container_width=True,
+        )
+
+    if submitted:
+        email = email.strip()
+        token = token.strip()
+
+        if not email or not token:
+            st.warning(
+                t("Preencha o e-mail e o código de recuperação.")
+            )
+        else:
+            result = verify_recovery_otp(
+                email=email,
+                token=token,
+            )
+
+            if result["success"]:
+                start_session(result["session"])
+
+                st.session_state["password_recovery_mode"] = True
+                st.session_state["show_recovery_code"] = False
+                st.session_state["show_password_reset"] = False
+
+                st.rerun()
+
+            else:
+                st.error(
+                    translate_generated_text(result["error"])
+                )
+
+    if st.button(
+        t("← Solicitar novo código"),
+        use_container_width=True,
+    ):
+        st.session_state["show_recovery_code"] = False
+        st.session_state["show_password_reset"] = True
         st.rerun()
-    else:
-        st.session_state["password_recovery_error"] = result["error"]
-        st.query_params.clear()
-        st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# Password policy
+# =========================================================
+PASSWORD_REQUIREMENT_TEXT = (
+    "A senha deve ter pelo menos 6 caracteres e conter "
+    "pelo menos uma letra e um número."
+)
+
+
+def validate_password(password: str) -> str | None:
+    """
+    Valida a mesma política configurada no Supabase:
+    - mínimo de 6 caracteres;
+    - pelo menos uma letra;
+    - pelo menos um número.
+    """
+    if len(password) < 6:
+        return "A senha deve ter pelo menos 6 caracteres."
+
+    if not any(char.isalpha() for char in password):
+        return "A senha deve conter pelo menos uma letra."
+
+    if not any(char.isdigit() for char in password):
+        return "A senha deve conter pelo menos um número."
+
+    return None
 
 
 # =========================================================
@@ -295,11 +355,14 @@ def show_update_password() -> None:
         t("Escolha uma nova senha para acessar sua conta."),
     )
 
+    st.caption(t(PASSWORD_REQUIREMENT_TEXT))
+
     with st.form("update_password_form"):
         new_password = st.text_input(
             t("Nova senha"),
             type="password",
             key="new_password",
+            help=t(PASSWORD_REQUIREMENT_TEXT),
         )
         confirm_password = st.text_input(
             t("Confirmar nova senha"),
@@ -318,6 +381,12 @@ def show_update_password() -> None:
         elif new_password != confirm_password:
             st.warning(t("As senhas não coincidem."))
         else:
+            password_error = validate_password(new_password)
+
+            if password_error:
+                st.warning(t(password_error))
+                return
+
             result = update_password(new_password)
 
             if result["success"]:
@@ -368,7 +437,10 @@ def show_password_reset_request() -> None:
             )
 
             if result["success"]:
-                st.success(translate_generated_text(result["message"]))
+                st.session_state["password_recovery_email"] = email.strip()
+                st.session_state["show_password_reset"] = False
+                st.session_state["show_recovery_code"] = True
+                st.rerun()
             else:
                 st.error(translate_generated_text(result["error"]))
 
@@ -383,6 +455,9 @@ def show_password_reset_request() -> None:
 # Screen: Login / Sign up
 # =========================================================
 def show_login() -> None:
+    if st.session_state.pop("account_deleted", False):
+        st.success(t("Sua conta e os dados associados foram excluídos com sucesso."))
+
     if st.session_state.pop("password_reset_completed", False):
         st.success(t("Senha atualizada com sucesso. Entre com sua nova senha."))
 
@@ -428,14 +503,27 @@ def show_login() -> None:
             st.rerun()
 
     with signup_tab:
+        st.caption(t(PASSWORD_REQUIREMENT_TEXT))
+
         with st.form("signup_form"):
             email = st.text_input(t("E-mail"), key="signup_email")
-            password = st.text_input(t("Senha"), type="password", key="signup_password")
+            password = st.text_input(
+                t("Senha"),
+                type="password",
+                key="signup_password",
+                help=t(PASSWORD_REQUIREMENT_TEXT),
+            )
             submitted = st.form_submit_button(t("Criar conta"), use_container_width=True)
         if submitted:
             if not email or not password:
                 st.warning(t("Preencha e-mail e senha."))
             else:
+                password_error = validate_password(password)
+
+                if password_error:
+                    st.warning(t(password_error))
+                    return
+
                 result = sign_up(email, password)
                 if not result["success"]:
                     st.error(translate_generated_text(result["error"]))
@@ -446,6 +534,15 @@ def show_login() -> None:
                 else:
                     start_session(result["session"])
                     st.rerun()
+
+    st.divider()
+    if st.button(
+        t("Política de Privacidade"),
+        key="open_privacy_policy",
+        use_container_width=True,
+    ):
+        st.session_state["show_privacy_policy"] = True
+        st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -483,36 +580,13 @@ def show_onboarding(user_id: str) -> None:
 
     st.divider()
 
-    st.subheader(
-        t("Existe algo que você gostaria que o Mody levasse em consideração ao organizar seu dia?")
-    )
+    st.subheader(t("Como o Mody pode te ajudar melhor?"))
     st.caption(
-        t("Essa informação é opcional e serve apenas para personalizar sua experiência. O Mody não realiza diagnósticos.")
-    )
-
-    current_profile_value = existing_preferences.get("support_profile")
-    profile_labels = list(SUPPORT_PROFILE_OPTIONS.keys())
-    default_index = None
-    if current_profile_value and current_profile_value in SUPPORT_PROFILE_REVERSE:
-        default_index = profile_labels.index(
-            SUPPORT_PROFILE_REVERSE[current_profile_value]
+        t(
+            "Escolha quantas opções fizerem sentido. "
+            "Isso é opcional e pode ser alterado depois."
         )
-
-    chosen_profile_label = st.radio(
-        t("Selecione uma opção"),
-        profile_labels,
-        index=default_index,
-        label_visibility="collapsed",
     )
-    support_profile = (
-        SUPPORT_PROFILE_OPTIONS[chosen_profile_label]
-        if chosen_profile_label is not None
-        else None
-    )
-
-    st.divider()
-
-    st.subheader(t("Com o que você mais gostaria de ajuda no dia a dia?"))
 
     current_needs_values = existing_preferences.get("support_needs") or []
     default_needs_labels = [
@@ -526,8 +600,13 @@ def show_onboarding(user_id: str) -> None:
         list(SUPPORT_NEEDS_OPTIONS.keys()),
         default=default_needs_labels,
         label_visibility="collapsed",
+        placeholder=t("Selecione uma ou mais opções"),
     )
-    support_needs = [SUPPORT_NEEDS_OPTIONS[label] for label in chosen_needs_labels]
+
+    support_needs = [
+        SUPPORT_NEEDS_OPTIONS[label]
+        for label in chosen_needs_labels
+    ]
 
     st.divider()
 
@@ -540,7 +619,10 @@ def show_onboarding(user_id: str) -> None:
 
     if st.button(t("Concluir"), type="primary", use_container_width=True):
         profile_result = save_profile(user_id, display_name, timezone)
-        preferences_result = save_preferences(user_id, support_profile, support_needs)
+        preferences_result = save_preferences(
+            user_id=user_id,
+            support_needs=support_needs,
+        )
         if not profile_result["success"]:
             st.error(translate_generated_text(profile_result["error"]))
         elif not preferences_result["success"]:
@@ -924,11 +1006,11 @@ def show_overview(user_id: str, display_name: str | None) -> None:
     else:
         d = checkin_result["data"]
         _render_metric_row([
-            (d["total_checkins"], t("Total")),
-            (_format_average(d["average_energy"]), t("Energia média")),
-            (_format_average(d["average_anxiety"]), t("Ansiedade média")),
-            (_format_average(d["average_focus"]), t("Foco médio")),
-        ])
+        (d["total_checkins"], t("Total")),
+        (d["well_count"], t("Bem")),
+        (d["overwhelmed_count"], t("Sobrecarregada")),
+        (d["calm_needed_count"], t("Quero desacelerar")),
+])
         if d["total_checkins"] == 0:
             st.info(t("Ainda não há check-ins registrados."))
 
@@ -963,23 +1045,18 @@ def show_overview(user_id: str, display_name: str | None) -> None:
         st.error(translate_generated_text(timeseries_result["error"]))
     else:
         timeseries = timeseries_result["data"]
-        numeric_columns = ["energy_level", "anxiety_level", "focus_level"]
-        has_numeric_data = any(
-            row.get(col) is not None for row in timeseries for col in numeric_columns
-        )
-        if not timeseries or not has_numeric_data:
+
+        if not timeseries:
             st.info(t("Ainda não há dados suficientes para mostrar a evolução."))
         else:
-            # pandas ONLY for chart shaping; None becomes NaN (never 0),
-            # which st.line_chart renders as line gaps.
-            evolution_df = pd.DataFrame(timeseries)
-            evolution_df["created_at"] = pd.to_datetime(evolution_df["created_at"])
-            evolution_df = evolution_df.rename(columns={
-                "energy_level": t("Energia"),
-                "anxiety_level": t("Ansiedade"),
-                "focus_level": t("Foco"),
-            })
-            st.line_chart(evolution_df, x="created_at", y=[t("Energia"), t("Ansiedade"), t("Foco")])
+            st.info(
+                t(
+                    "Os check-ins atuais registram apenas seu estado do momento. "
+                    "A evolução detalhada de energia, ansiedade e foco não faz parte "
+                    "dos dados reais do Mody."
+                )
+            )
+
 
 
 # =========================================================
@@ -1179,17 +1256,15 @@ def show_historical_analysis(user_id: str, display_name: str | None) -> None:
 # =========================================================
 # Routing
 # =========================================================
-handle_password_recovery_callback()
-
-if st.session_state.get("password_recovery_error"):
-    st.error(translate_generated_text(st.session_state["password_recovery_error"]))
-    if st.button(t("Solicitar novo link"), use_container_width=True):
-        st.session_state.pop("password_recovery_error", None)
-        st.session_state.pop("recovery_code_processed", None)
-        st.session_state["show_password_reset"] = True
+if st.session_state.get("show_privacy_policy", False):
+    if st.button(t("← Voltar"), key="back_from_privacy"):
+        st.session_state["show_privacy_policy"] = False
         st.rerun()
+    show_privacy_policy()
 elif st.session_state.get("password_recovery_mode", False):
     show_update_password()
+elif st.session_state.get("show_recovery_code", False):
+    show_password_recovery_code()
 elif st.session_state.get("show_password_reset", False):
     show_password_reset_request()
 elif not is_authenticated():
@@ -1238,6 +1313,37 @@ else:
             st.session_state.clear()
             set_language(language)
             st.rerun()
+
+        with st.sidebar.expander(t("Conta")):
+            st.warning(
+                t(
+                    "Excluir a conta é permanente. "
+                    "Suas tarefas, check-ins, compromissos, perfil "
+                    "e preferências também serão removidos."
+                )
+            )
+
+            confirm_delete = st.checkbox(
+                t("Entendo que esta ação não pode ser desfeita."),
+                key="confirm_account_deletion",
+            )
+
+            if st.button(
+                t("Excluir minha conta"),
+                key="delete_my_account_button",
+                use_container_width=True,
+                disabled=not confirm_delete,
+            ):
+                language = get_language()
+                result = delete_account()
+
+                if result["success"]:
+                    st.session_state.clear()
+                    set_language(language)
+                    st.session_state["account_deleted"] = True
+                    st.rerun()
+                else:
+                    st.error(translate_generated_text(result["error"]))
 
         if page == "today":
             show_home(current_user_id, display_name)

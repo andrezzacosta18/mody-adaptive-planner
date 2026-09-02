@@ -59,8 +59,8 @@ if "auth" not in st.session_state:
 
 def is_authenticated() -> bool:
     """
-    Check whether a saved authentication session exists and restore
-    it in the Supabase client.
+    Check whether a saved authentication session exists
+    and restore it in the Supabase client.
     """
     auth = st.session_state.auth
 
@@ -85,14 +85,15 @@ def is_authenticated() -> bool:
 
 def show_login_page():
     """
-    Display the temporary authentication interface used only for
-    onboarding testing.
+    Display the temporary authentication interface used
+    only for onboarding testing.
     """
 
     st.title("🧪 Teste de Onboarding — Login")
 
     st.caption(
-        "Use uma conta já criada e confirmada ou crie uma nova conta."
+        "Use uma conta já criada e confirmada "
+        "ou crie uma nova conta."
     )
 
     login_tab, signup_tab = st.tabs(
@@ -217,31 +218,14 @@ def show_login_page():
 # UI ↔ DATABASE VALUE MAPPINGS
 # =========================================================
 
-SUPPORT_PROFILE_OPTIONS = {
-    "TDAH": "adhd",
-    "Ansiedade": "anxiety",
-    "TDAH e ansiedade": "adhd_anxiety",
-    "Nenhum desses": "none",
-    "Prefiro não informar": "prefer_not_to_say",
-}
-
-
-SUPPORT_PROFILE_OPTIONS_REVERSE = {
-    database_value: ui_label
-    for ui_label, database_value
-    in SUPPORT_PROFILE_OPTIONS.items()
-}
-
-
 SUPPORT_NEEDS_OPTIONS = {
-    "Começar tarefas": "start_tasks",
-    "Organizar meu dia": "organize_day",
-    "Lembrar compromissos": "remember_commitments",
+    "Organizar minhas tarefas": "organize_tasks",
+    "Começar tarefas com mais facilidade": "start_tasks",
+    "Manter o foco": "maintain_focus",
     "Evitar sobrecarga": "avoid_overload",
-    "Reduzir distrações": "reduce_distractions",
-    "Gerenciar ansiedade": "manage_anxiety",
-    "Criar rotinas": "build_routines",
-    "Estimar melhor o tempo": "estimate_time",
+    "Planejar minha rotina": "plan_routine",
+    "Lembrar compromissos": "remember_commitments",
+    "Dividir tarefas grandes em passos menores": "break_down_tasks",
 }
 
 
@@ -351,78 +335,12 @@ def show_onboarding_page():
     # =====================================================
 
     st.subheader(
-        "Personalização"
-    )
-
-    st.write(
-        "Existe algo que você gostaria que o Mody "
-        "levasse em consideração ao organizar seu dia?"
+        "Como o Mody pode te ajudar melhor?"
     )
 
     st.caption(
-        "Essa informação é opcional e serve apenas para "
-        "personalizar sua experiência. "
-        "O Mody não realiza diagnósticos."
-    )
-
-    current_support_profile = (
-        existing_preferences.get(
-            "support_profile"
-        )
-    )
-
-    profile_options = list(
-        SUPPORT_PROFILE_OPTIONS.keys()
-    )
-
-    # No option selected by default.
-    default_profile_index = None
-
-    if (
-        current_support_profile
-        and current_support_profile
-        in SUPPORT_PROFILE_OPTIONS_REVERSE
-    ):
-
-        current_ui_value = (
-            SUPPORT_PROFILE_OPTIONS_REVERSE[
-                current_support_profile
-            ]
-        )
-
-        default_profile_index = (
-            profile_options.index(
-                current_ui_value
-            )
-        )
-
-    selected_profile_label = st.radio(
-        "Selecione uma opção:",
-        profile_options,
-        index=default_profile_index,
-        label_visibility="collapsed",
-    )
-
-    if selected_profile_label:
-
-        support_profile = (
-            SUPPORT_PROFILE_OPTIONS[
-                selected_profile_label
-            ]
-        )
-
-    else:
-
-        support_profile = None
-
-    st.divider()
-
-    # =====================================================
-    # SECTION 3 — SUPPORT NEEDS
-    # =====================================================
-
-    st.subheader(
-        "Com o que você mais gostaria de ajuda no dia a dia?"
+        "Selecione apenas as opções que fizerem sentido para você. "
+        "Essa etapa é opcional."
     )
 
     current_support_needs = (
@@ -439,12 +357,11 @@ def show_onboarding_page():
     ]
 
     selected_support_labels = st.multiselect(
-        "Selecione quantas fizerem sentido:",
+        "Selecione quantas opções quiser:",
         list(
             SUPPORT_NEEDS_OPTIONS.keys()
         ),
         default=default_support_needs,
-        label_visibility="collapsed",
     )
 
     support_needs = [
@@ -471,7 +388,6 @@ def show_onboarding_page():
 
         preferences_result = save_preferences(
             user_id,
-            support_profile,
             support_needs,
         )
 
